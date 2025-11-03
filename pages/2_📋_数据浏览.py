@@ -129,14 +129,14 @@ else:
             st.subheader("👀 数据预览")
             
             # 分页控制
-            col1, col2, col3 = st.columns([1, 2, 1])
+            col1, col2, col3 = st.columns([.5, 4, .5])
             with col1:
                 page_size = st.selectbox("每页显示行数", [50, 100, 200, 500], index=0)
             with col2:
                 st.write("")  # 占位
             with col3:
                 total_pages = max(1, (len(table_data) + page_size - 1) // page_size)
-                page_number = st.number_input("页码", min_value=1, max_value=total_pages, value=1)
+                page_number = st.number_input("", min_value=1, max_value=total_pages, value=1)
             
             # 计算分页
             start_idx = (page_number - 1) * page_size
@@ -147,7 +147,7 @@ else:
             st.dataframe(page_data, use_container_width=True)
             
             # 分页信息
-            st.write(f"显示第 {start_idx + 1} - {min(end_idx, len(table_data))} 行，共 {len(table_data)} 行")
+            st.caption(f"第 {page_number} / {total_pages} 页` `第 {start_idx + 1} - {min(end_idx, len(table_data))} 行，共 {len(table_data)} 行")
             
             # 数据统计
             st.subheader("📈 数据统计")
