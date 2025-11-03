@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import math
 from datetime import datetime, timedelta
 from core.database import get_connection
 
@@ -8,28 +9,6 @@ from core.database import get_connection
 # ==============================
 st.set_page_config(page_title="价格查询中心", layout="wide")
 st.title("🔍 价格查询中心")
-
-# ==============================
-# 🎨 自定义样式
-# ==============================
-st.markdown("""
-<style>
-.metric-card {
-    background-color: #f9fafb;
-    padding: 1rem;
-    border-radius: 12px;
-    border-left: 5px solid #3b82f6;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-    margin-bottom: 1rem;
-}
-.filter-box {
-    background-color: #f0f4f8;
-    border-radius: 10px;
-    padding: 1rem;
-    margin-bottom: 1.5rem;
-}
-</style>
-""", unsafe_allow_html=True)
 
 # ==============================
 # ⏱️ 获取数据库日期范围
@@ -47,66 +26,69 @@ def get_date_range():
 min_date, max_date = get_date_range()
 
 # ==============================
-# 📋 最新价格数据
+# 📋 最新价格数据（独立表）
 # ==============================
-st.subheader("📋 最新价格数据")
+with st.container():
+    st.markdown("### 📋 最新价格数据")
+    st.caption("展示每个客户及产品组合的最新成交价格")
 
-@st.cache_data(ttl=600)
-def get_latest_prices():
-    with get_connection() as conn:
-        df = pd.read_sql_query("""
-            WITH Latest AS (
-                SELECT *,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY customer_name, finance_id, sub_customer_name, color, grade
-                           ORDER BY record_date DESC
-                       ) rn
-                FROM sales_records
-                WHERE unit_price > 0
-            )
-            SELECT customer_name AS 客户名称,
-                   finance_id AS 财务编号,
-                   COALESCE(NULLIF(sub_customer_name, ''), '主客户') AS 子客户,
-                   color AS 产品颜色,
-                   COALESCE(grade, '无等级') AS 等级,
-                   unit_price AS 单价,
-                   quantity AS 数量,
-                   amount AS 金额,
-                   record_date AS 记录日期
-            FROM Latest WHERE rn = 1
-            ORDER BY customer_name, color;
-        """, conn)
-        for c in ['单价', '数量', '金额']:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).round(2)
-        return df
-latest_df = get_latest_prices()
-if not latest_df.empty:
-    st.dataframe(latest_df, use_container_width=True, height=350)
-    csv = latest_df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 导出最新价格数据", csv, "latest_prices.csv", "text/csv", use_container_width=True)
-else:
-    st.info("暂无最新价格数据")
+    @st.cache_data(ttl=300)
+    def get_latest_prices():
+        with get_connection() as conn:
+            df = pd.read_sql_query("""
+                WITH Latest AS (
+                    SELECT *,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY customer_name, finance_id, sub_customer_name, color, grade
+                               ORDER BY record_date DESC
+                           ) rn
+                    FROM sales_records
+                    WHERE unit_price > 0
+                )
+                SELECT 
+                    customer_name AS 客户名称,
+                    finance_id AS 财务编号,
+                    COALESCE(NULLIF(sub_customer_name, ''), '主客户') AS 子客户,
+                    color AS 产品颜色,
+                    COALESCE(grade, '无等级') AS 等级,
+                    ROUND(unit_price, 2) AS 单价,
+                    quantity AS 数量,
+                    ROUND(amount, 2) AS 金额,
+                    record_date AS 记录日期
+                FROM Latest WHERE rn = 1
+                ORDER BY customer_name, color;
+            """, conn)
+            for c in ['单价', '数量', '金额']:
+                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).round(2)
+            return df
+
+    latest_df = get_latest_prices()
+
+    st.dataframe(latest_df, use_container_width=True, height=500)
+    csv_latest = latest_df.to_csv(index=False, encoding='utf-8-sig')
+    st.download_button("📥 导出最新价格数据 (CSV)", csv_latest, "最新价格数据.csv", "text/csv", use_container_width=True)
 
 # ==============================
 # 🎛️ 高级查询模块
 # ==============================
-# st.markdown("---")
-st.markdown('<div class="filter-box">', unsafe_allow_html=True)
+st.markdown("""<div style="background: #f8fafc;border-radius: 12px;padding: 1rem;margin-bottom: 1.5rem;"</div>""", unsafe_allow_html=True)
+st.markdown("### 🎛️ 高级数据查询")
+st.caption("在此根据客户、产品、时间范围等条件筛选所有历史销售记录。")
 
-st.subheader("🎛️ 高级查询")
-
-# ---- 筛选面板 ----
+# ---- 查询条件卡 ----
 with st.container():
-    col1, col2, col3, col4 = st.columns(4)
+    # 第一行：客户、颜色、等级、时间段
+    col1, col2, col3, col4 = st.columns([2, 2, 1.5, 1.5])
     with col1:
-        customer_filter = st.text_input("客户名称", placeholder="输入客户名称关键词")
+        customer_filter = st.text_input("客户名称", placeholder="支持模糊匹配")
     with col2:
-        color_filter = st.text_input("产品颜色", placeholder="输入产品颜色关键词")
+        color_filter = st.text_input("产品颜色", placeholder="支持模糊匹配")
     with col3:
         grade_filter = st.selectbox("产品等级", ["全部", "优", "壹", "(空)"])
     with col4:
         quick_select = st.selectbox("时间范围", ["最近30天", "最近90天", "全部时间", "自定义"])
-    
+
+    # 时间筛选
     if quick_select == "自定义":
         col5, col6 = st.columns(2)
         with col5:
@@ -121,12 +103,11 @@ with st.container():
             start_date = end_date - timedelta(days=90)
         elif quick_select == "全部时间":
             start_date, end_date = min_date.date(), max_date.date()
-st.markdown('</div>', unsafe_allow_html=True)
 
 # ==============================
-# 🧩 查询逻辑（默认加载所有数据）
+# 🧩 查询逻辑
 # ==============================
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def query_sales_records(customer=None, color=None, grade=None, start=None, end=None):
     query = """
         SELECT 
@@ -136,8 +117,8 @@ def query_sales_records(customer=None, color=None, grade=None, start=None, end=N
             color AS 产品颜色,
             COALESCE(grade,'无等级') AS 等级,
             quantity AS 数量,
-            unit_price AS 单价,
-            amount AS 金额,
+            ROUND(unit_price, 2) AS 单价,
+            ROUND(amount, 2) AS 金额,
             record_date AS 记录日期
         FROM sales_records
         WHERE unit_price > 0
@@ -161,57 +142,71 @@ def query_sales_records(customer=None, color=None, grade=None, start=None, end=N
     if conditions:
         query += " AND " + " AND ".join(conditions)
     query += " ORDER BY record_date DESC"
+
     with get_connection() as conn:
         df = pd.read_sql_query(query, conn, params=params)
         for c in ['数量', '单价', '金额']:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).round(2)
         return df
 
 # ==============================
-# 🔍 执行查询（默认加载）
+# 🔍 查询执行（自动加载）
 # ==============================
-try:
-    df = query_sales_records(customer_filter, color_filter, grade_filter, start_date, end_date)
-
-    if df.empty:
-        st.warning("⚠️ 当前筛选条件无匹配结果，显示空表结构")
-        empty_columns = ['客户名称', '财务编号', '子客户', '产品颜色', '等级', '数量', '单价', '金额', '记录日期']
-        df = pd.DataFrame(columns=empty_columns)
-
-    st.subheader(f"📋 查询结果（共 {len(df):,} 条记录）")
-    st.dataframe(df, use_container_width=True, height=450)
-
-    # 汇总统计
-    st.markdown("#### 📊 查询汇总指标")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("平均单价", f"¥{df['单价'].mean():.2f}" if not df.empty else "¥0.00")
-    with col2:
-        st.metric("总金额", f"¥{df['金额'].sum():,.0f}" if not df.empty else "¥0")
-    with col3:
-        st.metric("总数量", f"{df['数量'].sum():,.0f}" if not df.empty else "0")
-    with col4:
-        st.metric("客户数量", df['客户名称'].nunique() if not df.empty else "0")
-
-    # 导出按钮
-    csv_filtered = df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 导出查询结果", csv_filtered, "filtered_sales_records.csv", "text/csv", use_container_width=True)
-except Exception as e:
-    st.error(f"❌ 查询出错: {e}")
+df = query_sales_records(customer_filter, color_filter, grade_filter, start_date, end_date)
+st.markdown(f"#### 📋 查询结果（共 {len(df):,} 条记录）")
 
 # ==============================
-# 📘 使用说明
+# 🔎 搜索 + 分页美化
 # ==============================
-with st.expander("📘 使用说明", expanded=False):
-    st.markdown("""
-    ### 页面说明
-    - **最新价格数据**：展示每个客户与产品的最新价格，独立存在，不受筛选影响。
-    - **高级查询**：默认展示所有销售记录，可通过客户、颜色、等级和时间范围进行筛选。
-    - **等级选项**：仅支持“优”、“壹”、“(空)” 三类或全部。
-    - **查询结果**：若无数据，将显示空表结构而非报错。
-    
-    ### 使用建议
-    - 若要查看最新行情，请关注上方独立表；
-    - 若要分析历史销售记录，请在筛选区选择客户或时间范围；
-    - 导出数据支持 Excel、BI 报表分析。
-    """)
+search_term = st.text_input("🔎 快速搜索（输入关键词过滤结果）", placeholder="输入客户、颜色、等级等进行模糊筛选")
+
+if search_term:
+    df_filtered = df[df.apply(lambda row: row.astype(str).str.contains(search_term, case=False).any(), axis=1)]
+else:
+    df_filtered = df
+
+page_size = 50
+total_pages = max(1, math.ceil(len(df_filtered) / page_size))
+page = st.session_state.get("page", 1)
+page = min(page, total_pages)
+
+start_idx = (page - 1) * page_size
+end_idx = start_idx + page_size
+page_data = df_filtered.iloc[start_idx:end_idx]
+
+if page_data.empty:
+    st.warning("⚠️ 当前条件下无匹配数据。")
+else:
+    st.dataframe(page_data, use_container_width=True, height=500)
+
+# 页码控制栏（底部右侧）
+col_left, col_right = st.columns([4, .5])
+with col_left:
+    st.caption(f"第 {page} / {total_pages} 页")
+
+with col_right:
+    new_page = st.number_input("页码跳转", min_value=1, max_value=total_pages, value=page, step=1, label_visibility="collapsed")
+    if new_page != page:
+        st.session_state["page"] = new_page
+        st.rerun()
+
+# ==============================
+# 📊 汇总与导出
+# ==============================
+st.markdown("#### 📊 汇总指标")
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("平均单价", f"¥{df_filtered['单价'].mean():.2f}" if not df_filtered.empty else "¥0.00")
+with col2:
+    st.metric("总金额", f"¥{df_filtered['金额'].sum():,.2f}" if not df_filtered.empty else "¥0.00")
+with col3:
+    st.metric("总数量", f"{df_filtered['数量'].sum():,.0f}" if not df_filtered.empty else "0")
+with col4:
+    st.metric("客户数量", df_filtered['客户名称'].nunique() if not df_filtered.empty else "0")
+
+if not df_filtered.empty:
+    export_df = df_filtered.copy()
+    for col in ['单价', '金额']:
+        export_df[col] = export_df[col].apply(lambda x: f"{x:.2f}")
+    csv_filtered = export_df.to_csv(index=False, encoding='utf-8-sig')
+    st.download_button("📥 导出筛选结果 (CSV)", csv_filtered, "销售记录查询结果.csv", "text/csv", use_container_width=True)
