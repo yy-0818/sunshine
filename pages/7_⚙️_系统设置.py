@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import sys
 from datetime import datetime
-from core.database import get_database_status, optimize_database, clear_database, init_database
+from core.database import get_database_status, optimize_database, clear_database, init_database, get_connection
 from core.analysis_service import AnalysisService
 
 st.set_page_config(page_title="系统设置", layout="wide")
@@ -64,7 +64,7 @@ for table in ['customers', 'sales_records', 'price_change_history']:
     tables_info.append({"表名": table, "记录数": count})
 
 tables_df = pd.DataFrame(tables_info)
-st.dataframe(tables_df, use_container_width=True)
+st.dataframe(tables_df, width="stretch")
 
 # 数据库维护
 st.subheader("🔧 数据库维护")
@@ -72,21 +72,21 @@ st.subheader("🔧 数据库维护")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    if st.button("🔄 重新初始化数据库", use_container_width=True):
+    if st.button("🔄 重新初始化数据库", width="stretch"):
         if st.checkbox("确认重新初始化数据库？这将重建所有表结构"):
             init_database()
             st.success("✅ 数据库初始化完成")
             st.rerun()
 
 with col2:
-    if st.button("⚡ 优化数据库", use_container_width=True):
+    if st.button("⚡ 优化数据库", width="stretch"):
         with st.spinner("正在优化数据库..."):
             optimize_database()
         st.success("✅ 数据库优化完成")
         st.rerun()
 
 with col3:
-    if st.button("🗑️ 清空所有数据", use_container_width=True, type="secondary"):
+    if st.button("🗑️ 清空所有数据", width="stretch", type="secondary"):
         if st.checkbox("确认清空所有数据？此操作不可恢复！"):
             clear_database()
             st.success("✅ 所有数据已清空")
@@ -156,7 +156,7 @@ try:
         ''', conn)
     
     if not recent_operations.empty:
-        st.dataframe(recent_operations, use_container_width=True)
+        st.dataframe(recent_operations, width="stretch")
     else:
         st.info("最近7天内无操作记录")
 except:
@@ -168,7 +168,7 @@ st.subheader("💾 数据备份")
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("📤 备份数据库", use_container_width=True):
+    if st.button("📤 备份数据库", width="stretch"):
         try:
             import shutil
             import datetime

@@ -96,7 +96,7 @@ else:
             lambda x: '是' if (str(x).lower() == 'true' if isinstance(x, str) else bool(x)) else '否'
         )
         
-        st.dataframe(display_df, use_container_width=True)
+        st.dataframe(display_df, width="stretch")
         
         # 客户编辑功能
         st.subheader("✏️ 客户信息编辑")
@@ -175,7 +175,7 @@ else:
                         st.write(f"- 状态: {'活跃' if is_active else '停用'}")
                     
                     # 提交按钮
-                    if st.form_submit_button("💾 更新客户信息", use_container_width=True):
+                    if st.form_submit_button("💾 更新客户信息", width="stretch"):
                         try:
                             with get_connection() as conn:
                                 cursor = conn.cursor()
@@ -204,7 +204,7 @@ else:
             csv_data,
             "customers.csv",
             "text/csv",
-            use_container_width=True
+            width="stretch"
         )
     else:
         st.info("没有找到符合条件的客户")

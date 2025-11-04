@@ -139,7 +139,7 @@ else:
                 if col in display_trend.columns:
                     display_trend[col] = display_trend[col].round(2)
             
-            st.dataframe(display_trend, use_container_width=True)
+            st.dataframe(display_trend, width="stretch")
             
             # 导出功能
             csv_data = display_trend.to_csv(index=False).encode('utf-8')
@@ -148,7 +148,7 @@ else:
                 csv_data,
                 f"price_trend_{selected_customer}_{selected_color}.csv",
                 "text/csv",
-                use_container_width=True
+                width="stretch"
             )
             
         else:

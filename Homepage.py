@@ -65,27 +65,27 @@ def render_dashboard():
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        if st.button("📥 数据导入", use_container_width=True):
+        if st.button("📥 数据导入", width="stretch"):
             st.switch_page("pages/1_📥_数据导入.py")
     with col2:
-        if st.button("📋 数据浏览", use_container_width=True):
+        if st.button("📋 数据浏览", width="stretch"):
             st.switch_page("pages/2_📋_数据浏览.py")
     with col3:
-        if st.button("🔍 价格查询", use_container_width=True):
+        if st.button("🔍 价格查询", width="stretch"):
             st.switch_page("pages/3_🔍_价格查询.py")
     with col4:
-        if st.button("📊 数据统计", use_container_width=True):
+        if st.button("📊 数据统计", width="stretch"):
             st.switch_page("pages/4_📊_数据统计.py")
     
     col5, col6, col7 = st.columns(3)
     with col5:
-        if st.button("📈 价格趋势", use_container_width=True):
+        if st.button("📈 价格趋势", width="stretch"):
             st.switch_page("pages/5_📈_价格趋势.py")
     with col6:
-        if st.button("👥 客户管理", use_container_width=True):
+        if st.button("👥 客户管理", width="stretch"):
             st.switch_page("pages/6_👥_客户管理.py")
     with col7:
-        if st.button("⚙️ 系统设置", use_container_width=True):
+        if st.button("⚙️ 系统设置", width="stretch"):
             st.switch_page("pages/7_⚙️_系统设置.py")
     
     # 使用说明
@@ -146,7 +146,7 @@ def render_sidebar_status():
     # 操作按钮
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 🔧 快捷操作")
-    if st.sidebar.button("优化数据库", use_container_width=True):
+    if st.sidebar.button("优化数据库", width="stretch"):
         try:
             from core.database import optimize_database
             optimize_database()

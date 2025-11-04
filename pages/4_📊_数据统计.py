@@ -97,7 +97,7 @@ try:
                     xaxis_title="月份",
                     title_font=dict(size=18)
                 )
-                st.plotly_chart(fig_monthly, use_container_width=True)
+                st.plotly_chart(fig_monthly, width="stretch")
             else:
                 st.info("暂无月度趋势数据")
         
@@ -127,7 +127,7 @@ try:
                     }
                 )
                 fig_color.update_layout(template="plotly_white", xaxis_tickangle=-30,xaxis_title='产品颜色',yaxis_title='销售额（元）')
-                st.plotly_chart(fig_color, use_container_width=True)
+                st.plotly_chart(fig_color, width="stretch")
             else:
                 st.info("暂无产品颜色销售数据")
         
@@ -169,7 +169,7 @@ try:
                     }
                 )
                 fig_price_dist.update_layout(template="plotly_white",xaxis_title='价格区间',yaxis_title='交易数量')
-                st.plotly_chart(fig_price_dist, use_container_width=True)
+                st.plotly_chart(fig_price_dist, width="stretch")
             else:
                 st.info("暂无价格分布数据")
         
@@ -184,7 +184,7 @@ try:
                 fig_price_avg.update_traces(line=dict(color='#FFA726', width=3), marker=dict(size=8, symbol='circle'))
                 fig_price_avg.update_layout(template="plotly_white", xaxis_title='价格区间', yaxis_title='平均价格（元）', hovermode='x unified', showlegend=False
                 )
-                st.plotly_chart(fig_price_avg, use_container_width=True)
+                st.plotly_chart(fig_price_avg, width="stretch")
             else:
                 st.info("暂无价格分布数据")
         
@@ -235,7 +235,7 @@ try:
                     hovertemplate='<b>%{x}</b><br>销售额：¥%{y:,.2f}<extra></extra>',
                     marker_line_width=1,
                 )
-                st.plotly_chart(fig_customer_sales, use_container_width=True)
+                st.plotly_chart(fig_customer_sales, width="stretch")
 
             else:
                 st.info("暂无客户交易数据")
@@ -271,7 +271,7 @@ try:
                                 '交易次数：%{marker.size}<br>' +
                                 '平均价格：¥%{marker.color:,.2f}<extra></extra>',
                 )
-                st.plotly_chart(fig_customer_products, use_container_width=True)
+                st.plotly_chart(fig_customer_products, width="stretch")
 
             else:
                 st.info("暂无客户交易数据")
@@ -331,7 +331,7 @@ try:
                 fig_top_products.update_traces(
                     hovertemplate='<b>%{x}</b><br>销售额：¥%{y:,.2f}<br>等级：%{fullData.name}<extra></extra>'
                 )
-                st.plotly_chart(fig_top_products, use_container_width=True)
+                st.plotly_chart(fig_top_products, width="stretch")
             
             with col2:
                 # 产品价格分布
@@ -376,7 +376,7 @@ try:
                     plot_bgcolor='rgba(0,0,0,0)'
                 )
 
-                st.plotly_chart(fig_product_price, use_container_width=True)
+                st.plotly_chart(fig_product_price, width="stretch")
 
         
         # 时间趋势分析
@@ -438,7 +438,7 @@ try:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 )
 
-                st.plotly_chart(fig_trend, use_container_width=True)
+                st.plotly_chart(fig_trend, width="stretch")
             
             with col2:
                 # 月度交易量趋势
@@ -473,7 +473,7 @@ try:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 )
 
-                st.plotly_chart(fig_price_qty, use_container_width=True)
+                st.plotly_chart(fig_price_qty, width="stretch")
             
             # 月度详细数据
             st.markdown("#### 📈 月度详细数据")
@@ -484,7 +484,7 @@ try:
                 'avg_price': '平均价格',
                 'total_quantity': '总数量'
             })
-            # st.dataframe(display_monthly.round(2), use_container_width=True)
+            # st.dataframe(display_monthly.round(2), width="stretch")
             see_data = st.expander('查看月度详细数据 👉')
             with see_data:
                 st.dataframe(data=display_monthly.round(2).reset_index(drop=True))
@@ -524,7 +524,7 @@ try:
                     csv_customer,
                     "customer_statistics.csv",
                     "text/csv",
-                    use_container_width=True
+                    width="stretch"
                 )
         
         with col2:
@@ -536,7 +536,7 @@ try:
                     csv_product,
                     "product_statistics.csv",
                     "text/csv",
-                    use_container_width=True
+                    width="stretch"
                 )
         
         with col3:
@@ -548,7 +548,7 @@ try:
                     csv_monthly,
                     "monthly_trend.csv",
                     "text/csv", 
-                    use_container_width=True
+                    width="stretch"
                 )
 
 except Exception as e:

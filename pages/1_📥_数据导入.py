@@ -20,6 +20,7 @@ with st.expander("📋 数据格式说明", expanded=True):
     - ✅ **年** (必需) - 交易年份
     - ✅ **月** (必需) - 交易月份
     - ✅ **日** (必需) - 交易日期
+    - ✅ **产品名称** (必需) - 产品名称
     - ✅ **颜色** (必需) - 产品颜色
     - ⚠️ **等级** (可选) - 产品等级
     - ⚠️ **数量** (可选) - 销售数量
@@ -54,7 +55,7 @@ if uploaded_file is not None:
         success, preview_df = preview_excel_data(temp_path, 5)
         if success:
             st.subheader("👀 数据预览 (前5行)")
-            st.dataframe(preview_df, use_container_width=True)
+            st.dataframe(preview_df, width="stretch")
         else:
             st.error(f"预览失败: {preview_df}")
     else:
@@ -64,7 +65,7 @@ if uploaded_file is not None:
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("🚀 开始导入", type="primary", use_container_width=True):
+        if st.button("🚀 开始导入", type="primary", width="stretch"):
             with st.spinner("正在导入数据..."):
                 success, message = import_service.import_excel_data(temp_path, "user")
             
@@ -75,11 +76,11 @@ if uploaded_file is not None:
                 st.error(message)
     
     with col2:
-        if st.button("🔄 重新验证", use_container_width=True):
+        if st.button("🔄 重新验证", width="stretch"):
             st.rerun()
     
     with col3:
-        if st.button("🗑️ 清空数据库", type="secondary", use_container_width=True):
+        if st.button("🗑️ 清空数据库", type="secondary", width="stretch"):
             if st.checkbox("确认清空所有数据？此操作不可恢复！"):
                 clear_database()
                 st.success("数据库已清空")

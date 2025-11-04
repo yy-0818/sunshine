@@ -32,7 +32,7 @@ with st.container():
     st.markdown("### 📋 最新价格数据")
     st.caption("展示每个客户及产品组合的最新成交价格")
 
-    @st.cache_data(ttl=300)
+    @st.cache_data(ttl=600)
     def get_latest_prices():
         with get_connection() as conn:
             df = pd.read_sql_query("""
@@ -64,14 +64,15 @@ with st.container():
 
     latest_df = get_latest_prices()
 
-    st.dataframe(latest_df, use_container_width=True, height=500)
+    st.dataframe(latest_df, width="stretch", height=500)
     csv_latest = latest_df.to_csv(index=False, encoding='utf-8-sig')
-    st.download_button("📥 导出最新价格数据 (CSV)", csv_latest, "最新价格数据.csv", "text/csv", use_container_width=True)
+    st.download_button("📥 导出最新价格数据 (CSV)", csv_latest, "最新价格数据.csv", "text/csv", width="stretch")
 
 # ==============================
 # 🎛️ 高级查询模块
 # ==============================
-st.markdown("""<div style="background: #f8fafc;border-radius: 12px;padding: 1rem;margin-bottom: 1.5rem;"</div>""", unsafe_allow_html=True)
+# st.markdown("""<div style="background: #f8fafc;border-radius: 12px;padding: 1rem;margin-bottom: 1.5rem;"</div>""", unsafe_allow_html=True)
+st.markdown("----")
 st.markdown("### 🎛️ 高级数据查询")
 st.caption("在此根据客户、产品、时间范围等条件筛选所有历史销售记录。")
 
@@ -107,7 +108,7 @@ with st.container():
 # ==============================
 # 🧩 查询逻辑
 # ==============================
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def query_sales_records(customer=None, color=None, grade=None, start=None, end=None):
     query = """
         SELECT 
@@ -177,7 +178,7 @@ page_data = df_filtered.iloc[start_idx:end_idx]
 if page_data.empty:
     st.warning("⚠️ 当前条件下无匹配数据。")
 else:
-    st.dataframe(page_data, use_container_width=True, height=500)
+    st.dataframe(page_data, width="stretch", height=500)
 
 # 页码控制栏（底部右侧）
 col_left, col_right = st.columns([4, .5])
@@ -209,4 +210,4 @@ if not df_filtered.empty:
     for col in ['单价', '金额']:
         export_df[col] = export_df[col].apply(lambda x: f"{x:.2f}")
     csv_filtered = export_df.to_csv(index=False, encoding='utf-8-sig')
-    st.download_button("📥 导出筛选结果 (CSV)", csv_filtered, "销售记录查询结果.csv", "text/csv", use_container_width=True)
+    st.download_button("📥 导出筛选结果 (CSV)", csv_filtered, "销售记录查询结果.csv", "text/csv", width="stretch")

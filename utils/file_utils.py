@@ -1,10 +1,9 @@
-# utils/file_utils.py
 import pandas as pd
 import warnings
 from openpyxl import load_workbook
 
 def validate_excel_structure(file_path):
-    """验证Excel文件结构 - 适配新表头"""
+    """验证Excel文件结构"""
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -18,7 +17,7 @@ def validate_excel_structure(file_path):
                     headers.append(str(cell.value).strip())
             
             # 必需的表头 - 根据新数据源调整
-            required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '颜色', '等级', '数量', '单价', '金额']
+            required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '颜色', '等级', '数量', '单价', '金额', '备注', '票号']
             missing_headers = [h for h in required_headers if h not in headers]
             
             if missing_headers:

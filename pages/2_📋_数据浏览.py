@@ -95,7 +95,7 @@ else:
         if not columns_info.empty:
             st.dataframe(columns_info[['name', 'type', 'notnull', 'dflt_value']].rename(
                 columns={'name': '列名', 'type': '数据类型', 'notnull': '是否非空', 'dflt_value': '默认值'}
-            ), use_container_width=True)
+            ), width="stretch")
         
         # 获取表数据
         with st.spinner(f"正在加载 {selected_table} 表数据..."):
@@ -144,7 +144,7 @@ else:
             page_data = table_data.iloc[start_idx:end_idx]
             
             # 显示数据
-            st.dataframe(page_data, use_container_width=True)
+            st.dataframe(page_data, width="stretch")
             
             # 分页信息
             st.caption(f"第 {page_number} / {total_pages} 页` `第 {start_idx + 1} - {min(end_idx, len(table_data))} 行，共 {len(table_data)} 行")
@@ -166,7 +166,7 @@ else:
                         '唯一值数': table_data[col].nunique()
                     })
                 col_info_df = pd.DataFrame(col_info)
-                st.dataframe(col_info_df, use_container_width=True)
+                st.dataframe(col_info_df, width="stretch")
             
             with tab2:
                 # 数据类型
@@ -180,14 +180,14 @@ else:
                         '示例值': str(sample_value)[:50] if sample_value is not None else 'None'
                     })
                 dtype_df = pd.DataFrame(dtype_info)
-                st.dataframe(dtype_df, use_container_width=True)
+                st.dataframe(dtype_df, width="stretch")
             
             with tab3:
                 # 数值列统计
                 numeric_cols = table_data.select_dtypes(include=['number']).columns
                 if len(numeric_cols) > 0:
                     numeric_stats = table_data[numeric_cols].describe()
-                    st.dataframe(numeric_stats, use_container_width=True)
+                    st.dataframe(numeric_stats, width="stretch")
                 else:
                     st.info("该表没有数值列")
             
@@ -204,7 +204,7 @@ else:
                     page_csv,
                     f"{selected_table}_page_{page_number}.csv",
                     "text/csv",
-                    use_container_width=True
+                    width="stretch"
                 )
             
             with col2:
@@ -215,7 +215,7 @@ else:
                     full_csv,
                     f"{selected_table}_full.csv",
                     "text/csv",
-                    use_container_width=True
+                    width="stretch"
                 )
             
             # 快速查询
@@ -227,7 +227,7 @@ else:
             with query_col2:
                 st.write("")  # 占位
                 st.write("")  # 占位
-                search_clicked = st.button("搜索", use_container_width=True)
+                search_clicked = st.button("搜索", width="stretch")
             
             if search_clicked and search_term:
                 # 在所有列中搜索
@@ -245,7 +245,7 @@ else:
                 
                 if not search_results.empty:
                     st.success(f"找到 {len(search_results)} 条匹配记录")
-                    st.dataframe(search_results, use_container_width=True)
+                    st.dataframe(search_results, width="stretch")
                     
                     # 导出搜索结果
                     search_csv = search_results.to_csv(index=False).encode('utf-8')
@@ -254,7 +254,7 @@ else:
                         search_csv,
                         f"{selected_table}_search_results.csv",
                         "text/csv",
-                        use_container_width=True
+                        width="stretch"
                     )
                 else:
                     st.warning("没有找到匹配的记录")
