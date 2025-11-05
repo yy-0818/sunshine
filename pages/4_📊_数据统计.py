@@ -126,7 +126,7 @@ try:
                         'total_amount': '销售额（￥）'
                     }
                 )
-                fig_color.update_layout(template="plotly_white", xaxis_tickangle=-30,xaxis_title='产品颜色',yaxis_title='销售额（元）')
+                fig_color.update_layout(template="plotly_white", xaxis_tickangle=-30,xaxis_title='产品颜色',yaxis_title='销售额（￥）')
                 st.plotly_chart(fig_color, width="stretch")
             else:
                 st.info("暂无产品颜色销售数据")
@@ -140,15 +140,20 @@ try:
             price_distribution = pd.read_sql_query('''
                 SELECT 
                     CASE 
-                        WHEN unit_price <= 1 THEN '0-1'
-                        WHEN unit_price <= 2 THEN '1-2'
-                        WHEN unit_price <= 5 THEN '2-5'
+                        WHEN unit_price <= 0.5 THEN '0-0.5'
+                        WHEN unit_price <= 1 THEN '0.5-1'
+                        WHEN unit_price <= 1.5 THEN '1-1.5'
+                        WHEN unit_price <= 2 THEN '1.5-2'
+                        WHEN unit_price <= 3 THEN '2-3'
+                        WHEN unit_price <= 5 THEN '3-5'
                         WHEN unit_price <= 10 THEN '5-10'
                         ELSE '10+'
                     END as price_range,
                     COUNT(*) as count,
                     AVG(unit_price) as avg_price,
-                    SUM(amount) as total_amount
+                    SUM(amount) as total_amount,
+                    MIN(unit_price) as min_price,
+                    MAX(unit_price) as max_price
                 FROM sales_records 
                 WHERE unit_price > 0
                 GROUP BY price_range
@@ -162,32 +167,119 @@ try:
                 fig_price_dist = px.bar(
                     price_distribution, x='price_range', y='count',
                     title="📦 价格区间交易分布",
-                    color='count', color_continuous_scale="Viridis",
+                    color='count', 
+                    color_continuous_scale="Viridis",
+                    text='count',
                     labels={
                         'price_range': '价格区间',
                         'count': '交易数量'
-                    }
+                    },
                 )
-                fig_price_dist.update_layout(template="plotly_white",xaxis_title='价格区间',yaxis_title='交易数量')
+                fig_price_dist.update_layout(template="plotly_white",
+                                             xaxis_title='价格区间(￥)',
+                                             yaxis_title='交易数量',
+                                             xaxis={'categoryorder': 'array', 'categoryarray': price_distribution['price_range'].tolist()})
+                fig_price_dist.update_traces(
+                    texttemplate='%{text}', 
+                    textposition='outside',
+                    marker_line_width=1
+                )
                 st.plotly_chart(fig_price_dist, width="stretch")
+                # 添加数据统计卡片
+                total_transactions = price_distribution['count'].sum()
+                main_range_count = price_distribution[price_distribution['price_range'].isin(['1-1.5', '1.5-2'])]['count'].sum()
+                main_range_percentage = (main_range_count / total_transactions) * 100
+                
+                st.metric("核心价格区间(1-2元)占比", f"{main_range_percentage:.1f}%",delta=f"{main_range_count}笔交易")
             else:
                 st.info("暂无价格分布数据")
         
         with col2:
             if not price_distribution.empty:
-                fig_price_avg = px.line(price_distribution,x='price_range',y='avg_price',title='📈各价格区间平均价格',markers=True,
-                    labels={
-                        'price_range': '价格区间',
-                        'avg_price': '平均价格（元）'
-                    }
+                # 创建组合图表：折线图+柱状图
+                from plotly.subplots import make_subplots
+                
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # 添加交易数量柱状图
+                fig.add_trace(
+                    go.Bar(
+                        x=price_distribution['price_range'], 
+                        y=price_distribution['count'],
+                        name="交易数量",
+                        marker_color='#1f77b4',
+                        opacity=0.85
+                    ),
+                    secondary_y=False
                 )
-                fig_price_avg.update_traces(line=dict(color='#FFA726', width=3), marker=dict(size=8, symbol='circle'))
-                fig_price_avg.update_layout(template="plotly_white", xaxis_title='价格区间', yaxis_title='平均价格（元）', hovermode='x unified', showlegend=False
+                
+                # 添加平均价格折线图
+                fig.add_trace(
+                    go.Scatter(
+                        x=price_distribution['price_range'], 
+                        y=price_distribution['avg_price'],
+                        name="平均价格",
+                        line_shape='spline', 
+                        mode='lines+markers',
+                        line=dict(color='#ff7f0e', width=3),
+                        marker=dict(size=5, symbol='circle', line=dict(width=1, color='white')),
+                        hovertemplate='￥%{y:.2f}'
+                    ),
+                    secondary_y=True
                 )
-                st.plotly_chart(fig_price_avg, width="stretch")
+                
+                fig.update_layout(
+                    title="📈 价格分布与平均价格趋势",
+                    template="plotly_white",
+                    xaxis_title='价格区间',
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    yaxis2=dict(overlaying='y', side='right', showgrid=False),
+                    hovermode=('x unified'),
+                )
+                
+                fig.update_yaxes(title_text="交易数量", secondary_y=False)
+                fig.update_yaxes(title_text="平均价格（￥）", secondary_y=True)
+                
+                st.plotly_chart(fig, width="stretch")
+                
+                # 添加价格集中度分析
+                st.markdown("**价格集中度分析**")
+                
+                # 计算价格分布的统计指标
+                max_count_range = price_distribution.loc[price_distribution['count'].idxmax()]
+                col_21, col_22 = st.columns(2)
+                with col_21:
+                    st.write(f"• **最密集区间**: ￥{max_count_range['price_range']} ({max_count_range['count']}笔)")
+
+                with col_22:
+                    st.write(f"• **价格跨度**: ￥{price_distribution['min_price'].min():.2f} - {price_distribution['max_price'].max():.2f}")
+                
             else:
                 st.info("暂无价格分布数据")
-        
+
+        # 在下方添加详细数据表格
+        if not price_distribution.empty:
+            st.subheader("📋 详细价格分布数据")
+            
+            # 格式化显示表格
+            display_df = price_distribution.copy()
+            display_df['占比'] = (display_df['count'] / display_df['count'].sum() * 100).round(1).astype(str) + '%'
+            display_df['平均价格'] = display_df['avg_price'].round(2)
+            display_df['总金额'] = display_df['total_amount'].round(2)
+            
+            st.dataframe(
+                display_df[['price_range', 'count', '占比', '平均价格', '总金额']],
+                column_config={
+                    'price_range': '价格区间',
+                    'count': '交易笔数',
+                    '占比': '占比',
+                    '平均价格': '平均价格(元)',
+                    '总金额': '总金额(元)'
+                },
+                use_container_width=True,
+                hide_index=True
+            )
         # 客户分析
         st.markdown("---")
         st.subheader("👥 客户分析")
@@ -251,7 +343,7 @@ try:
                     hover_name='customer_name',
                     title='💬 客户销售额 vs 产品多样性',
                     color_continuous_scale='Viridis',
-                    size_max=30,
+                    size_max=35,
                     labels={
                         'total_amount': '销售额（￥）',
                         'product_colors': '产品颜色数',
@@ -328,9 +420,9 @@ try:
                     ),
                     margin=dict(l=50, r=50, t=50, b=100),
                 )
-                fig_top_products.update_traces(
-                    hovertemplate='<b>%{x}</b><br>销售额：¥%{y:,.2f}<br>等级：%{fullData.name}<extra></extra>'
-                )
+                # fig_top_products.update_traces(
+                #     hovertemplate='<b>%{x}</b><br>销售额：¥%{y:,.2f}<br>等级：%{fullData.name}<extra></extra>'
+                # )
                 st.plotly_chart(fig_top_products, width="stretch")
             
             with col2:
@@ -378,7 +470,6 @@ try:
 
                 st.plotly_chart(fig_product_price, width="stretch")
 
-        
         # 时间趋势分析
         st.markdown("---")
         st.subheader("📅 时间趋势分析")
@@ -415,7 +506,7 @@ try:
                     marker=dict(size=6),
                     fill='tozeroy',
                     fillcolor='rgba(37,99,235,0.1)',
-                    hovertemplate='月份: %{x}<br>销售额: ¥%{y:,.2f}'
+                    hovertemplate='¥%{y:,.2f}'
                 ))
 
                 # 交易次数趋势（次轴）
@@ -425,7 +516,7 @@ try:
                     name='交易次数',
                     marker_color='rgba(16,185,129,0.6)',
                     yaxis='y2',
-                    hovertemplate='<br>月份: %{x}</br><br>交易次数: %{y:,}<extra></extra>'
+                    hovertemplate='%{y:,}'
                 ))
 
                 # 图表布局
@@ -436,6 +527,7 @@ try:
                     yaxis=dict(title="销售额 (¥)", side='left', showgrid=False),
                     yaxis2=dict(title="交易次数", overlaying='y', side='right', showgrid=False),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    hovermode=('x unified'),
                 )
 
                 st.plotly_chart(fig_trend, width="stretch")
@@ -448,20 +540,20 @@ try:
                 fig_price_qty.add_trace(go.Scatter(
                     x=monthly_trend['month'],
                     y=monthly_trend['avg_price'],
-                    name='平均单价 (¥)',
+                    name='平均单价',
                     line_shape='spline',
                     line=dict(color='#F97316', width=3, dash='dot'),
-                    marker=dict(size=7, symbol='circle'),
-                    hovertemplate='月份: %{x}<br>平均单价: ¥%{y:,.2f}'
+                    marker=dict(size=6, symbol='circle'),
+                    hovertemplate='¥%{y:,.2f}'
                 ))
 
                 fig_price_qty.add_trace(go.Bar(
                     x=monthly_trend['month'],
                     y=monthly_trend['total_quantity'],
                     name='销售数量',
-                    marker_color='rgba(59,130,246,0.3)',
+                    marker_color='rgba(49,130,246,0.8)',
                     yaxis='y2',
-                    hovertemplate='<b>月份: %{x}</b><br>销售数量: %{y:,}<extra></extra>'
+                    hovertemplate='销售数量: %{y:,}<extra></extra>'
                 ))
 
                 fig_price_qty.update_layout(
@@ -471,6 +563,7 @@ try:
                     yaxis=dict(title="平均单价 (¥)"),
                     yaxis2=dict(title="销售数量", overlaying='y', side='right', showgrid=False),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    hovermode=('x unified'),
                 )
 
                 st.plotly_chart(fig_price_qty, width="stretch")
