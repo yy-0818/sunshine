@@ -264,9 +264,9 @@ else:
         edited_df = st.data_editor(
             display_df,
             column_config={
-                "id": st.column_config.NumberColumn("ID", disabled=True),
+                "id": st.column_config.NumberColumn("ID", disabled=True,width=1),
                 "客户名称": st.column_config.TextColumn("客户名称", disabled=True),
-                "财务编号": st.column_config.TextColumn("财务编号", disabled=True),
+                "财务编号": st.column_config.TextColumn("财务编号", disabled=True,width=1),
                 "子客户名称": st.column_config.TextColumn("子客户类型", disabled=True),
                 "区域": st.column_config.TextColumn("区域"),
                 "联系人": st.column_config.TextColumn("联系人"),
