@@ -22,7 +22,6 @@ def get_date_range():
         if not res.empty:
             return pd.to_datetime(res.min_date[0]), pd.to_datetime(res.max_date[0])
     return datetime.now() - timedelta(days=30), datetime.now()
-
 min_date, max_date = get_date_range()
 
 # ==============================
@@ -32,7 +31,7 @@ with st.container():
     st.markdown("### 📋 最新价格数据")
     st.caption("展示每个客户及产品组合的最新成交价格")
 
-    @st.cache_data(ttl=600)
+    @st.cache_data(ttl=6000)
     def get_latest_prices():
         with get_connection() as conn:
             df = pd.read_sql_query("""
@@ -64,14 +63,21 @@ with st.container():
 
     latest_df = get_latest_prices()
 
-    st.dataframe(latest_df, width="stretch", height=500)
+    st.dataframe(latest_df, width="stretch", height=500, column_config={
+        # "客户名称": {"width": 1},
+        "财务编号": {"width": 1},
+        "数量": {"width": 1},
+        "等级": {"width": 1},
+        "记录日期": {"width": 1},
+        '单价':st.column_config.NumberColumn(format="￥ %2f",width=1),
+        '金额':st.column_config.NumberColumn(format="￥ %2f",width=1),
+    })
     csv_latest = latest_df.to_csv(index=False, encoding='utf-8-sig')
     st.download_button("📥 导出最新价格数据 (CSV)", csv_latest, "最新价格数据.csv", "text/csv", width="stretch")
 
 # ==============================
 # 🎛️ 高级查询模块
 # ==============================
-# st.markdown("""<div style="background: #f8fafc;border-radius: 12px;padding: 1rem;margin-bottom: 1.5rem;"</div>""", unsafe_allow_html=True)
 st.markdown("----")
 st.markdown("### 🎛️ 高级数据查询")
 st.caption("在此根据客户、产品、时间范围等条件筛选所有历史销售记录。")
@@ -108,7 +114,7 @@ with st.container():
 # ==============================
 # 🧩 查询逻辑
 # ==============================
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=6000)
 def query_sales_records(customer=None, color=None, grade=None, start=None, end=None):
     query = """
         SELECT 
@@ -166,7 +172,7 @@ if search_term:
 else:
     df_filtered = df
 
-page_size = 50
+page_size = 100
 total_pages = max(1, math.ceil(len(df_filtered) / page_size))
 page = st.session_state.get("page", 1)
 page = min(page, total_pages)
@@ -178,7 +184,15 @@ page_data = df_filtered.iloc[start_idx:end_idx]
 if page_data.empty:
     st.warning("⚠️ 当前条件下无匹配数据。")
 else:
-    st.dataframe(page_data, width="stretch", height=500)
+    st.dataframe(page_data, height=500,column_config={
+        "财务编号": {"width": 1},
+        "等级": {"width": 1},
+        # '颜色':st.column_config.Column(width=1),
+        "数量": {"width": 1},
+        '单价':st.column_config.NumberColumn(format="￥ %2f",width=1),
+        '金额':st.column_config.NumberColumn(format="￥ %2f",width=1)
+        }  
+    )
 
 # 页码控制栏（底部右侧）
 col_left, col_right = st.columns([4, .5])
