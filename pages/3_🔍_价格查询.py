@@ -64,13 +64,13 @@ with st.container():
     latest_df = get_latest_prices()
 
     st.dataframe(latest_df, width="stretch", height=500, column_config={
-        # "客户名称": {"width": 1},
-        "财务编号": {"width": 1},
-        "数量": {"width": 1},
-        "等级": {"width": 1},
-        "记录日期": {"width": 1},
-        '单价':st.column_config.NumberColumn(format="￥ %2f",width=1),
-        '金额':st.column_config.NumberColumn(format="￥ %2f",width=1),
+        # "客户名称": {"width": 'samll'},
+        "财务编号": {"width": 'small'},
+        "数量": {"width": 'small'},
+        "等级": {"width": 'small'},
+        "记录日期": {"width": 'small'},
+        '单价':st.column_config.NumberColumn(format="¥%2f",width='samll'),
+        '金额':st.column_config.NumberColumn(format="¥%2f",width='small'),
     })
     csv_latest = latest_df.to_csv(index=False, encoding='utf-8-sig')
     st.download_button("📥 导出最新价格数据 (CSV)", csv_latest, "最新价格数据.csv", "text/csv", width="stretch")
@@ -185,12 +185,12 @@ if page_data.empty:
     st.warning("⚠️ 当前条件下无匹配数据。")
 else:
     st.dataframe(page_data, height=500,column_config={
-        "财务编号": {"width": 1},
-        "等级": {"width": 1},
-        # '颜色':st.column_config.Column(width=1),
-        "数量": {"width": 1},
-        '单价':st.column_config.NumberColumn(format="￥ %2f",width=1),
-        '金额':st.column_config.NumberColumn(format="￥ %2f",width=1)
+        "财务编号": {"width": 'small'},
+        "等级": {"width": 'small'},
+        # '颜色':st.column_config.Column(width='small'),
+        "数量": {"width": 'small'},
+        '单价':st.column_config.NumberColumn(format="¥%2f",width='small'),
+        '金额':st.column_config.NumberColumn(format="¥%2f",width='small')
         }  
     )
 
