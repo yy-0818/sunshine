@@ -274,10 +274,10 @@ try:
                     'price_range': '价格区间',
                     'count': '交易笔数',
                     '占比': '占比',
-                    '平均价格': '平均价格(元)',
-                    '总金额': '总金额(元)'
+                    '平均价格': st.column_config.NumberColumn(format="¥%2f",width='small'),
+                    '总金额': st.column_config.NumberColumn(format="¥%2f",width='small')
                 },
-                use_container_width=True,
+                width='stretch',
                 hide_index=True
             )
         # 客户分析
@@ -577,26 +577,25 @@ try:
                 'avg_price': '平均价格',
                 'total_quantity': '总数量'
             })
-            # st.dataframe(display_monthly.round(2), width="stretch")
             see_data = st.expander('查看月度详细数据 👉')
             with see_data:
                 st.dataframe(data=display_monthly.round(2).reset_index(drop=True))
                 # 计算最近三个月变化
-                if len(monthly_trend) >= 3:
-                    recent = monthly_trend.tail(3)
-                    diff_amount = recent.iloc[-1]['total_amount'] - recent.iloc[0]['total_amount']
-                    pct_change = (diff_amount / recent.iloc[0]['total_amount']) * 100 if recent.iloc[0]['total_amount'] else 0
+                # if len(monthly_trend) >= 3:
+                #     recent = monthly_trend.tail(3)
+                #     diff_amount = recent.iloc[-1]['total_amount'] - recent.iloc[0]['total_amount']
+                #     pct_change = (diff_amount / recent.iloc[0]['total_amount']) * 100 if recent.iloc[0]['total_amount'] else 0
 
-                    if pct_change > 10:
-                        trend_text = f"📈 最近三个月销售额持续上升，增长约 **{pct_change:.1f}%**，业务保持良好增长态势。"
-                    elif pct_change < -10:
-                        trend_text = f"📉 最近三个月销售额下降约 **{abs(pct_change):.1f}%**，建议关注市场变化或客户流失。"
-                    else:
-                        trend_text = f"⚖️ 最近三个月销售额波动较小，整体保持稳定。"
-                else:
-                    trend_text = "📊 当前数据不足以进行趋势对比分析。"
+                #     if pct_change > 10:
+                #         trend_text = f"📈 最近三个月销售额持续上升，增长约 **{pct_change:.1f}%**，业务保持良好增长态势。"
+                #     elif pct_change < -10:
+                #         trend_text = f"📉 最近三个月销售额下降约 **{abs(pct_change):.1f}%**，建议关注市场变化或客户流失。"
+                #     else:
+                #         trend_text = f"⚖️ 最近三个月销售额波动较小，整体保持稳定。"
+                # else:
+                #     trend_text = "📊 当前数据不足以进行趋势对比分析。"
 
-                st.info(trend_text)
+                # st.info(trend_text)
         else:
             st.info("暂无足够的时间趋势数据")
 
