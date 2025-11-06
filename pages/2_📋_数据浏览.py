@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from core.database import get_connection
+from core.database import get_connection, get_database_status
 
 st.set_page_config(page_title="数据浏览", layout="wide")
 st.title("📋 数据库数据浏览")
@@ -42,28 +42,8 @@ def get_table_names():
             st.error(f"获取表名失败: {str(e)}")
             return []
 
-# 获取数据库大小
-def get_database_size():
-    """获取数据库大小"""
-    with get_connection() as conn:
-        try:
-            db_info = pd.read_sql_query("""
-                SELECT 
-                    page_count * page_size as size_bytes,
-                    (page_count * page_size) / 1024.0 as size_kb
-                FROM (
-                    SELECT 
-                        page_count, 
-                        page_size
-                    FROM pragma_page_count(), pragma_page_size()
-                )
-            """, conn)
-            if not db_info.empty:
-                return db_info.iloc[0]['size_kb']
-            return 0
-        except Exception as e:
-            st.error(f"获取数据库大小失败: {str(e)}")
-            return 0
+# 数据库信息
+db_status = get_database_status()
 
 # 获取表的列信息
 def get_table_columns(table_name):
@@ -276,10 +256,8 @@ else:
             st.write(f"- {table}: {count} 条记录")
     
     with overview_col2:
-        # 数据库大小信息
-        db_size_kb = get_database_size()
         st.write("**数据库信息:**")
-        st.write(f"- 总大小: {db_size_kb:.1f} KB")
+        st.write(f"- 总大小: {db_status.get('db_size_mb', 0):.1f} MB")
         st.write(f"- 表数量: {len(table_names)}")
         st.write(f"- 总记录数: {total_records}")
 
