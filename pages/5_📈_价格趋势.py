@@ -3,6 +3,11 @@ import pandas as pd
 from core.analysis_service import AnalysisService
 from core.database import get_connection
 
+st.logo(
+    image='https://doc-logo.streamlit.app/~/+/media/5bbeb2aa8dae615df2081a396b47e30bb710e10dd2f4f3f2e7b06c81.png',
+    icon_image='https://doc-logo.streamlit.app/~/+/media/5bbeb2aa8dae615df2081a396b47e30bb710e10dd2f4f3f2e7b06c81.png',
+)
+
 st.set_page_config(page_title="价格趋势", layout="wide")
 st.title("📈 价格趋势分析")
 
