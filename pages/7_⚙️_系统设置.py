@@ -8,8 +8,11 @@ from core.analysis_service import AnalysisService
 
 st.set_page_config(page_title="系统设置", layout="wide")
 st.title("⚙️ 系统设置")
-
 analysis_service = AnalysisService()
+
+# 添加会话状态来跟踪数据库操作
+if 'db_operation_performed' not in st.session_state:
+    st.session_state.db_operation_performed = False
 
 # 系统信息
 st.subheader("🖥️ 系统信息")
@@ -43,7 +46,7 @@ with col1:
 
 with col2:
     st.metric("变更历史记录", db_status.get('price_change_history_count', 0))
-    st.metric("数据库大小", f"{db_status.get('db_size_kb', 0):.1f} KB")
+    st.metric("数据库大小", f"{db_status.get('db_size_mb', 0):.1f} MB")
 
 with col3:
     # 数据完整性检查
@@ -75,22 +78,33 @@ with col1:
     if st.button("🔄 重新初始化数据库", width="stretch"):
         if st.checkbox("确认重新初始化数据库？这将重建所有表结构"):
             init_database()
+            st.session_state.db_operation_performed = True  # 标记操作已执行
             st.success("✅ 数据库初始化完成")
-            st.rerun()
+            st.rerun()  # 强制重新运行
 
 with col2:
     if st.button("⚡ 优化数据库", width="stretch"):
         with st.spinner("正在优化数据库..."):
             optimize_database()
+        st.session_state.db_operation_performed = True  # 标记操作已执行
         st.success("✅ 数据库优化完成")
-        st.rerun()
+        st.rerun()  # 强制重新运行
 
 with col3:
     if st.button("🗑️ 清空所有数据", width="stretch", type="secondary"):
         if st.checkbox("确认清空所有数据？此操作不可恢复！"):
             clear_database()
+            st.session_state.db_operation_performed = True  # 标记操作已执行
             st.success("✅ 所有数据已清空")
-            st.rerun()
+            st.rerun()  # 强制重新运行
+
+# 修改数据库状态获取，禁用缓存
+@st.cache_data(ttl=1)  # 1秒缓存，确保及时更新
+def get_fresh_database_status():
+    return get_database_status()
+
+# 使用新的函数获取状态
+db_status = get_fresh_database_status()
 
 # 数据统计
 st.subheader("📈 数据统计概览")
@@ -147,6 +161,7 @@ try:
                 '销售记录' as 操作类型,
                 strftime('%Y-%m-%d %H:%M', created_date) as 时间,
                 customer_name as 客户名称,
+                product_name as 产品名称,
                 color as 产品颜色,
                 unit_price as 单价
             FROM sales_records 
@@ -200,7 +215,7 @@ with st.expander("📚 使用说明", expanded=False):
     - 数据验证确保导入数据的完整性
     
     **价格查询**
-    - 支持按客户、产品颜色、等级进行查询
+    - 支持按客户、产品、颜色、等级进行查询
     - 实时显示最新价格信息
     
     **价格趋势**

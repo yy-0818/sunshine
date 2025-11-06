@@ -142,7 +142,7 @@ def add_customer_dialog():
         with col_btn2:
             submitted = st.form_submit_button(
                 "💾 保存新客户",
-                use_container_width=True
+                width='stretch'
             )
         
         if submitted:
@@ -275,7 +275,7 @@ else:
                 "更新时间": st.column_config.DatetimeColumn("更新时间", disabled=True)
             },
             hide_index=True,
-            use_container_width=True,
+            width='stretch',
             num_rows="fixed"
         )
         
@@ -395,7 +395,7 @@ else:
                 with col_btn2:
                     submitted = st.form_submit_button(
                         "💾 保存详细修改",
-                        use_container_width=True
+                        width='stretch'
                     )
                 
                 if submitted:
@@ -436,7 +436,7 @@ else:
             csv_data,
             "customers_export.csv",
             "text/csv",
-            use_container_width=True
+            width='stretch'
         )
     else:
         st.info("没有找到符合条件的客户")
