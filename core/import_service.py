@@ -1,4 +1,5 @@
 import pandas as pd
+import re
 import warnings
 from openpyxl import load_workbook
 from datetime import datetime
@@ -65,32 +66,44 @@ class ImportService:
             return False, f"文件检查失败: {str(e)}"
     
     def _clean_data(self, df):
-        """数据清洗 - 适配新数据源"""
+        """数据清洗 - 颜色拆分"""
+        # 首先拆分颜色列
+        if '颜色' in df.columns:
+            df = self._split_color_column(df)
+        
         # 重命名列
-        df = df.rename(columns={
+        column_mapping = {
             '客户名称': 'customer_name',
             '编号': 'finance_id',
             '子客户名称': 'sub_customer_name',
             '年': 'year',
             '月': 'month',
             '日': 'day',
+            '产品名称': 'product_name',
             '颜色': 'color',
             '等级': 'grade',
             '数量': 'quantity',
             '单价': 'unit_price',
             '金额': 'amount',
             '票 号': 'ticket_number',
+            '票号': 'ticket_number',  # 兼容不同列名
             '备注': 'remark',
             '生产线': 'production_line'
-        })
+        }
+        
+        # 只重命名存在的列
+        existing_columns = {k: v for k, v in column_mapping.items() if k in df.columns}
+        df = df.rename(columns=existing_columns)
         
         # 处理空值
-        df['sub_customer_name'] = df['sub_customer_name'].fillna('')
+        df['sub_customer_name'] = df.get('sub_customer_name', '').fillna('')
         df['finance_id'] = df['finance_id'].astype(str)
-        df['grade'] = df['grade'].fillna('')
-        df['ticket_number'] = df['ticket_number'].fillna('')
-        df['remark'] = df['remark'].fillna('')
-        df['production_line'] = df['production_line'].fillna('')
+        df['product_name'] = df.get('product_name', '').fillna('')
+        df['grade'] = df.get('grade', '').fillna('')
+        df['ticket_number'] = df.get('ticket_number', '').fillna('')
+        df['remark'] = df.get('remark', '').fillna('')
+        df['production_line'] = df.get('production_line', '').fillna('')
+        df['color'] = df.get('color', '').fillna('')
         
         # 数值列处理
         numeric_columns = ['year', 'month', 'day', 'quantity', 'unit_price', 'amount']
@@ -108,12 +121,75 @@ class ImportService:
         
         return df
     
+    def _split_color_column(self, df):
+        """
+        拆分颜色列 - 将产品名称与颜色分开
+        """
+        # 定义常见颜色列表
+        colors = ['孔雀兰', '钢灰', '橘红', '亚光黑', '大红', '深灰', '玫红', '蓝灰', '铁红', 
+                '古兰', '浅灰', '橘黄', '磨砂蓝', '亚光灰', '铁红', '九号蓝', '蓝灰']
+        
+        # 定义产品类型关键词
+        product_keywords = ['鑫阳光', '福迩家', '星月祥', '劲彩', '玖玉', '花脊座', '人字脊', 
+                        '边瓦', '长沟瓦', '脊瓦', '大脊瓦', '短沟瓦']
+        
+        def extract_product_and_color(text):
+            if pd.isna(text) or text == "":
+                return "", ""
+            
+            text = str(text).strip()
+            
+            # 处理特殊情况："壹"作为等级
+            if text.endswith('壹'):
+                text = text[:-1]  # 移除末尾的"壹"
+            
+            # 尝试从常见颜色中匹配
+            for color in colors:
+                if color in text:
+                    product_name = text.replace(color, "").strip()
+                    # 清理多余的空格和标点
+                    product_name = re.sub(r'\s+', ' ', product_name).strip()
+                    product_name = re.sub(r'^\s*[、，,]\s*', '', product_name)
+                    return product_name, color
+            
+            # 如果没有找到明确的颜色，尝试基于产品关键词拆分
+            for keyword in product_keywords:
+                if keyword in text:
+                    parts = text.split(keyword, 1)
+                    if len(parts) > 1:
+                        product_name = keyword + parts[1].split()[0] if parts[1].strip() else keyword
+                        color_part = parts[1].replace(parts[1].split()[0] if parts[1].strip() else "", "").strip()
+                        return product_name, color_part
+            
+            # 如果以上方法都不行，使用简单的空格拆分
+            parts = text.split()
+            if len(parts) >= 2:
+                color_found = parts[-1]
+                product_name = ' '.join(parts[:-1])
+                return product_name, color_found
+            else:
+                return text, ""
+        
+        # 应用拆分函数
+        split_results = df['颜色'].apply(extract_product_and_color)
+        df['产品名称'] = split_results.apply(lambda x: x[0])
+        df['颜色'] = split_results.apply(lambda x: x[1])
+        
+        return df
+    
     def _validate_data(self, df):
         """数据验证"""
         required_columns = ['customer_name', 'finance_id', 'color']
         for col in required_columns:
             if col not in df.columns or df[col].isnull().any():
                 return False, f"列 '{col}' 中存在空值或缺失，请检查数据"
+        
+        # 检查关键数值列的合理性
+        # if 'amount' in df.columns:
+        #     negative_amounts = df[df['amount'] < 0]
+        #     if len(negative_amounts) > 0:
+        #         return False, f"发现 {len(negative_amounts)} 条记录的金额为负数"
+        
         return True, "数据验证通过"
     
     def _import_to_database(self, df, user):
@@ -131,14 +207,14 @@ class ImportService:
                         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                     ''', (row['customer_name'], row['finance_id'], row['sub_customer_name']))
                 
-                # 导入销售记录
+                # 导入销售记录 - 修正占位符数量
                 for _, row in df.iterrows():
                     cursor.execute('''
                         INSERT INTO sales_records 
                         (customer_name, finance_id, sub_customer_name, year, month, day, 
-                         color, grade, quantity, unit_price, amount, 
+                         product_name, color, grade, quantity, unit_price, amount, 
                          ticket_number, remark, production_line, record_date)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         row['customer_name'],
                         row['finance_id'],
@@ -146,11 +222,12 @@ class ImportService:
                         int(row['year']) if pd.notna(row['year']) else None,
                         int(row['month']) if pd.notna(row['month']) else None,
                         int(row['day']) if pd.notna(row['day']) else None,
+                        row.get('product_name', ''),
                         row['color'],
                         row['grade'],
-                        row['quantity'] if pd.notna(row['quantity']) else None,
-                        row['unit_price'] if pd.notna(row['unit_price']) else None,
-                        row['amount'] if pd.notna(row['amount']) else None,
+                        float(row['quantity']) if pd.notna(row['quantity']) else None,
+                        float(row['unit_price']) if pd.notna(row['unit_price']) else None,
+                        float(row['amount']) if pd.notna(row['amount']) else None,
                         row['ticket_number'],
                         row['remark'],
                         row['production_line'],
@@ -160,8 +237,14 @@ class ImportService:
                 # 获取统计信息
                 customer_count = len(customers_data)
                 record_count = len(df)
+                product_varieties = df['product_name'].nunique() if 'product_name' in df.columns else 0
+                color_varieties = df['color'].nunique() if 'color' in df.columns else 0
                 
-                return True, f"数据导入成功！导入客户数: {customer_count}, 销售记录数: {record_count}"
+                return True, (f"数据导入成功！"
+                            f"导入客户数: {customer_count}, "
+                            f"销售记录数: {record_count}, "
+                            f"产品种类: {product_varieties}, "
+                            f"颜色种类: {color_varieties}")
                 
             except Exception as e:
                 return False, f"数据库导入失败: {str(e)}"

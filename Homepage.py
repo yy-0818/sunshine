@@ -1,7 +1,5 @@
-# app.py
 import streamlit as st
 from core.database import init_database, get_database_status
-import os
 
 def main():
     st.set_page_config(
@@ -44,7 +42,7 @@ def render_dashboard():
         with col3:
             st.metric("产品颜色", status.get('unique_colors', 0))
         with col4:
-            st.metric("数据大小", f"{status.get('db_size_kb', 0):.1f} KB")
+            st.metric("数据大小", f"{status.get('db_size_mb', 0):.1f} MB")
             
     except Exception as e:
         st.error(f"获取数据库状态失败: {str(e)}")
@@ -138,7 +136,7 @@ def render_sidebar_status():
         # 数据库信息
         st.sidebar.markdown("---")
         st.sidebar.markdown("### ℹ️ 系统信息")
-        st.sidebar.info(f"数据库大小: {status.get('db_size_kb', 0):.1f} KB")
+        st.sidebar.info(f"数据库大小: {status.get('db_size_mb', 0):.1f} MB")
         
     except Exception as e:
         st.sidebar.error("获取数据库状态失败")
