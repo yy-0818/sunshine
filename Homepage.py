@@ -2,8 +2,8 @@ import streamlit as st
 from core.database import init_database, get_database_status
 
 st.logo(
-    image='https://doc-logo.streamlit.app/~/+/media/5bbeb2aa8dae615df2081a396b47e30bb710e10dd2f4f3f2e7b06c81.png',
-    icon_image='https://doc-logo.streamlit.app/~/+/media/5bbeb2aa8dae615df2081a396b47e30bb710e10dd2f4f3f2e7b06c81.png',
+    image='./assets/logo.png',
+    icon_image='./assets/logo.png',
 )
 
 def main():

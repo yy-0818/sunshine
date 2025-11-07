@@ -7,8 +7,8 @@ from core.database import get_database_status, optimize_database, clear_database
 from core.analysis_service import AnalysisService
 
 st.logo(
-    image='https://doc-logo.streamlit.app/~/+/media/5bbeb2aa8dae615df2081a396b47e30bb710e10dd2f4f3f2e7b06c81.png',
-    icon_image='https://doc-logo.streamlit.app/~/+/media/5bbeb2aa8dae615df2081a396b47e30bb710e10dd2f4f3f2e7b06c81.png',
+    image='./assets/logo.png',
+    icon_image='./assets/logo.png',
 )
 
 st.set_page_config(page_title="系统设置", layout="wide")
