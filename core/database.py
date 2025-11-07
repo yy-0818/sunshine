@@ -3,28 +3,54 @@ import pandas as pd
 import os
 from datetime import datetime
 from contextlib import contextmanager
+import logging
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 数据库配置
+DB_CONFIG = {
+    'database': 'ceramic_prices.db',
+    'timeout': 30,
+    'detect_types': sqlite3.PARSE_DECLTYPES,
+    'check_same_thread': False
+}
 
 @contextmanager
 def get_connection():
     """数据库连接上下文管理器"""
-    conn = sqlite3.connect('ceramic_prices.db')
+    conn = sqlite3.connect(**DB_CONFIG)
     conn.row_factory = sqlite3.Row
+    # 性能优化设置
+    conn.execute("PRAGMA journal_mode=WAL")  # 写前日志，提高并发
+    conn.execute("PRAGMA synchronous=NORMAL")  # 平衡性能和数据安全
+    conn.execute("PRAGMA cache_size=-64000")  # 增加缓存大小
+    conn.execute("PRAGMA temp_store=MEMORY")  # 临时表存储在内存
+    conn.execute("PRAGMA mmap_size=268435456")  # 256MB内存映射
+    
     try:
         yield conn
         conn.commit()
-    except Exception:
+    except Exception as e:
         conn.rollback()
+        logger.error(f"数据库操作失败: {e}")
         raise
     finally:
         conn.close()
 
 def init_database():
-    """初始化数据库 - 适配新数据源结构"""
+    """初始化数据库 - 性能优化版本"""
     with get_connection() as conn:
         cursor = conn.cursor()
         
-        # 客户表
-        cursor.execute('''
+        # 启用外键约束
+        cursor.execute("PRAGMA foreign_keys=ON")
+        
+        # 使用批量执行减少IO操作
+        table_scripts = [
+            # 客户表
+            '''
             CREATE TABLE IF NOT EXISTS customers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 customer_name TEXT NOT NULL,
@@ -38,10 +64,9 @@ def init_database():
                 is_active BOOLEAN DEFAULT TRUE,
                 UNIQUE(customer_name, finance_id, sub_customer_name)
             )
-        ''')
-        
-        # 销售记录表 - 包含产品名称
-        cursor.execute('''
+            ''',
+            # 销售记录表
+            '''
             CREATE TABLE IF NOT EXISTS sales_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 customer_name TEXT NOT NULL,
@@ -65,10 +90,9 @@ def init_database():
                 FOREIGN KEY (customer_name, finance_id, sub_customer_name) 
                 REFERENCES customers(customer_name, finance_id, sub_customer_name)
             )
-        ''')
-        
-        # 价格变更历史表
-        cursor.execute('''
+            ''',
+            # 价格变更历史表
+            '''
             CREATE TABLE IF NOT EXISTS price_change_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sales_record_id INTEGER,
@@ -79,105 +103,97 @@ def init_database():
                 change_reason TEXT,
                 FOREIGN KEY (sales_record_id) REFERENCES sales_records (id)
             )
-        ''')
-        
-        # 创建索引
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_finance_id ON sales_records(finance_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_color_grade ON sales_records(color, grade)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_record_date ON sales_records(record_date)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_name ON sales_records(product_name)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_customer_hierarchy ON customers(customer_name, finance_id, sub_customer_name)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sales_customer_product ON sales_records(finance_id, sub_customer_name, color, grade, record_date)')
-
-        # 添加可能缺失的列
-        columns_to_add = [
-            ('customers', 'region', 'TEXT'),
-            ('customers', 'contact_person', 'TEXT'),
-            ('customers', 'phone', 'TEXT'),
-            ('sales_records', 'product_name', 'TEXT')
+            '''
         ]
         
-        for table, column, col_type in columns_to_add:
-            try:
-                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
-                print(f"成功添加列 {table}.{column}")
-            except sqlite3.OperationalError as e:
-                if "duplicate column name" in str(e):
-                    print(f"列 {table}.{column} 已存在")
-                else:
-                    print(f"列 {table}.{column} 添加失败: {e}")
+        for script in table_scripts:
+            cursor.execute(script)
         
-        # 检查表结构
+        # 批量创建索引
+        index_scripts = [
+            'CREATE INDEX IF NOT EXISTS idx_finance_id ON sales_records(finance_id)',
+            'CREATE INDEX IF NOT EXISTS idx_color_grade ON sales_records(color, grade)',
+            'CREATE INDEX IF NOT EXISTS idx_record_date ON sales_records(record_date)',
+            'CREATE INDEX IF NOT EXISTS idx_product_name ON sales_records(product_name)',
+            'CREATE INDEX IF NOT EXISTS idx_customer_hierarchy ON customers(customer_name, finance_id, sub_customer_name)',
+            'CREATE INDEX IF NOT EXISTS idx_sales_customer_product ON sales_records(finance_id, sub_customer_name, color, grade, record_date)',
+            'CREATE INDEX IF NOT EXISTS idx_sales_date_composite ON sales_records(year, month, day)',
+            'CREATE INDEX IF NOT EXISTS idx_customer_finance ON customers(finance_id)'
+        ]
+        
+        for script in index_scripts:
+            cursor.execute(script)
+        
+        # 优化表结构检查
+        _check_and_alter_tables(cursor)
+        
+        logger.info("数据库初始化完成")
+
+def _check_and_alter_tables(cursor):
+    """检查并修改表结构"""
+    columns_to_add = [
+        ('customers', 'region', 'TEXT'),
+        ('customers', 'contact_person', 'TEXT'),
+        ('customers', 'phone', 'TEXT'),
+        ('sales_records', 'product_name', 'TEXT'),
+        ('sales_records', 'ticket_number', 'TEXT')
+    ]
+    
+    for table, column, col_type in columns_to_add:
         try:
-            tables = ['customers', 'sales_records']
-            for table in tables:
-                cursor.execute(f"PRAGMA table_info({table})")
-                columns = cursor.fetchall()
-                column_names = [col[1] for col in columns]
-                print(f"表 {table} 的列: {column_names}")
-        except Exception as e:
-            print(f"检查表结构时出错: {e}")
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            logger.info(f"成功添加列 {table}.{column}")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" in str(e):
+                logger.debug(f"列 {table}.{column} 已存在")
+            else:
+                logger.warning(f"列 {table}.{column} 添加失败: {e}")
 
 def get_database_status():
     """获取数据库状态"""
     status = {}
     
     with get_connection() as conn:
-        # 表记录数
-        tables = ['customers', 'sales_records', 'price_change_history']
-        for table in tables:
-            try:
-                count = pd.read_sql_query(f"SELECT COUNT(*) as count FROM {table}", conn).iloc[0]['count']
-                status[f'{table}_count'] = count
-            except Exception as e:
-                print(f"获取表 {table} 记录数失败: {e}")
-                status[f'{table}_count'] = 0
-        
-        # 产品统计
         try:
-            product_stats = pd.read_sql_query('''
+            # 使用单个查询获取所有表记录数
+            table_counts = pd.read_sql_query('''
                 SELECT 
-                    COUNT(DISTINCT color) as unique_colors,
-                    COUNT(DISTINCT product_name) as unique_products,
-                    COUNT(DISTINCT color || product_name) as unique_combinations
-                FROM sales_records
+                    (SELECT COUNT(*) FROM customers) as customers_count,
+                    (SELECT COUNT(*) FROM sales_records) as sales_records_count,
+                    (SELECT COUNT(*) FROM price_change_history) as price_change_history_count,
+                    (SELECT COUNT(DISTINCT color) FROM sales_records) as unique_colors,
+                    (SELECT COUNT(DISTINCT product_name) FROM sales_records) as unique_products,
+                    (SELECT COUNT(DISTINCT color || product_name) FROM sales_records) as unique_combinations,
+                    (SELECT COUNT(DISTINCT customer_name || finance_id) FROM customers) as unique_customers
             ''', conn).iloc[0]
-            status['unique_colors'] = product_stats['unique_colors']
-            status['unique_products'] = product_stats['unique_products']
-            status['unique_combinations'] = product_stats['unique_combinations']
-        except Exception as e:
-            print(f"获取产品统计失败: {e}")
-            status.update({'unique_colors': 0, 'unique_products': 0, 'unique_combinations': 0})
-        
-        # 客户统计
-        try:
-            customers_count = pd.read_sql_query(
-                "SELECT COUNT(DISTINCT customer_name || finance_id) as count FROM customers", 
-                conn
-            ).iloc[0]['count']
-            status['customers_count'] = customers_count
-        except Exception as e:
-            print(f"获取客户统计失败: {e}")
-            status['customers_count'] = 0
             
-        # 销售记录统计
-        try:
-            sales_count = pd.read_sql_query(
-                "SELECT COUNT(*) as count FROM sales_records", 
-                conn
-            ).iloc[0]['count']
-            status['sales_records_count'] = sales_count
-            status['product_prices_count'] = sales_count
+            status.update({
+                'customers_count': table_counts['customers_count'],
+                'sales_records_count': table_counts['sales_records_count'],
+                'price_change_history_count': table_counts['price_change_history_count'],
+                'unique_colors': table_counts['unique_colors'],
+                'unique_products': table_counts['unique_products'],
+                'unique_combinations': table_counts['unique_combinations'],
+                'customers_count': table_counts['unique_customers'],
+                'product_prices_count': table_counts['sales_records_count']
+            })
+            
         except Exception as e:
-            print(f"获取销售记录统计失败: {e}")
-            status['sales_records_count'] = 0
-            status['product_prices_count'] = 0
+            logger.error(f"获取数据库状态失败: {e}")
+            # 设置默认值
+            default_values = {
+                'customers_count': 0, 'sales_records_count': 0, 'price_change_history_count': 0,
+                'unique_colors': 0, 'unique_products': 0, 'unique_combinations': 0,
+                'customers_count': 0, 'product_prices_count': 0
+            }
+            status.update(default_values)
         
         # 数据库大小
         try:
-            db_size = os.path.getsize('ceramic_prices.db') / 1024 / 1024  # 转换为MB
+            db_size = os.path.getsize(DB_CONFIG['database']) / 1024 / 1024
             status['db_size_mb'] = round(db_size, 2)
-        except:
+        except Exception as e:
+            logger.error(f"获取数据库大小失败: {e}")
             status['db_size_mb'] = 0
     
     return status
@@ -185,15 +201,40 @@ def get_database_status():
 def optimize_database():
     """优化数据库"""
     with get_connection() as conn:
+        conn.execute("PRAGMA optimize")
         conn.execute("VACUUM")
         conn.execute("ANALYZE")
-    print("数据库优化完成")
+    logger.info("数据库优化完成")
 
 def clear_database():
     """清空数据库"""
     with get_connection() as conn:
         cursor = conn.cursor()
+        # 禁用外键约束以提高删除速度
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.execute('DELETE FROM price_change_history')
         cursor.execute('DELETE FROM sales_records')
         cursor.execute('DELETE FROM customers')
-        cursor.execute('DELETE FROM price_change_history')
-    print("数据库已清空")
+        # 重新启用外键约束
+        cursor.execute("PRAGMA foreign_keys=ON")
+    logger.info("数据库已清空")
+
+def batch_insert_sales_records(records):
+    """批量插入销售记录"""
+    if not records:
+        return
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.executemany('''
+                INSERT INTO sales_records 
+                (customer_name, finance_id, sub_customer_name, year, month, day, 
+                 product_name, color, grade, quantity, unit_price, amount, 
+                 ticket_number, remark, production_line, record_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', records)
+            logger.info(f"批量插入了 {len(records)} 条销售记录")
+        except Exception as e:
+            logger.error(f"批量插入失败: {e}")
+            raise

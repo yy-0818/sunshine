@@ -76,6 +76,7 @@ def get_unique_colors():
         SELECT DISTINCT color 
         FROM sales_records 
         WHERE color IS NOT NULL AND color != '' 
+        AND unit_price > 0 AND quantity > 0 AND amount > 0
         ORDER BY color
     """
     with get_connection() as conn:
@@ -92,6 +93,7 @@ def get_unique_grades():
                 ELSE grade 
             END as grade_display
         FROM sales_records 
+        WHERE unit_price > 0 AND quantity > 0 AND amount > 0
         ORDER BY grade_display
     """
     with get_connection() as conn:
@@ -112,9 +114,10 @@ def query_sales_records(customer=None, colors=None, grades=None, start_date=None
             quantity AS 数量,
             ROUND(unit_price, 2) AS 单价,
             ROUND(amount, 2) AS 金额,
+            COALESCE(NULLIF(ticket_number,''), '无票号') AS 票据号,
             record_date AS 记录日期
         FROM sales_records
-        WHERE unit_price > 0 AND quantity > 0
+        WHERE unit_price > 0 AND quantity > 0 AND amount > 0
     """
     
     params = []
@@ -298,15 +301,21 @@ def render_query_results(df):
     # 搜索过滤
     search_term = st.text_input(
         "🔍 快速搜索", 
-        placeholder="输入关键词过滤结果（客户、产品、颜色等）",
-        help="在所有列中进行模糊搜索"
+        placeholder="输入关键词过滤结果（客户、产品、颜色、票据号等）",
+        help="在所有列中进行模糊搜索，支持数字和中文混合搜索"
     )
     
     if search_term:
-        df_filtered = df[df.astype(str).apply(
-            lambda row: row.str.contains(search_term, case=False, na=False).any(), 
-            axis=1
-        )]
+        # 改进的搜索逻辑，处理数字和中文混合的情况
+        def search_row(row):
+            try:
+                # 将行数据转换为字符串并进行搜索
+                row_str = ' '.join([str(x) for x in row if pd.notna(x)])
+                return search_term.lower() in row_str.lower()
+            except:
+                return False
+        
+        df_filtered = df[df.apply(search_row, axis=1)]
     else:
         df_filtered = df
     
@@ -346,6 +355,7 @@ def render_query_results(df):
                 "记录日期": st.column_config.DateColumn(width="small"),
                 "单价": st.column_config.NumberColumn(format="¥%.2f", width="small"),
                 "金额": st.column_config.NumberColumn(format="¥%.2f", width="small"),
+                "票据号": st.column_config.TextColumn(width="small"),
             }
         )
     
