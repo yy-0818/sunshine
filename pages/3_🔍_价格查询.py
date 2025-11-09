@@ -156,7 +156,12 @@ def query_sales_records(filters):
 # 🎛️ UI 部分
 # ==============================
 def render_filters():
-    """筛选区"""
+    st.markdown("### 🎛️ 高级数据查询")
+    st.caption("根据客户、产品、时间范围等条件筛选历史销售记录（展示所有数据）")
+    # 维持折叠状态
+    # if "filter_expanded" not in st.session_state:
+    #     st.session_state.filter_expanded = True
+    
     with st.expander("🎛️ 高级筛选条件", expanded=False):
         color_opts = get_unique_values("color")
         grade_opts = get_unique_values("grade")
@@ -167,23 +172,26 @@ def render_filters():
         with col1:
             customer = st.text_input("客户/产品名称", placeholder="支持模糊匹配")
         with col2:
-            colors = st.multiselect("产品颜色", color_opts, placeholder="支持颜色多选")
+            colors = st.multiselect("产品颜色", color_opts, placeholder="选择颜色（可多选）")
         with col3:
-            grades = st.multiselect("产品等级", grade_opts, placeholder="支持等级多选")
+            grades = st.multiselect("产品等级", grade_opts, placeholder="选择等级（可多选）")
 
         col4, col5 = st.columns([2, 1])
         with col4:
-            lines = st.multiselect("生产线", line_opts, placeholder="支持生产线多选")
+            lines = st.multiselect("生产线", line_opts, placeholder="选择生产线（可多选）")
         with col5:
             range_choice = st.selectbox(
                 "时间范围",
                 ["最近30天", "最近90天", "最近半年", "全部时间", "自定义"],
             )
-
+        # 计算时间范围
         start_date, end_date = min_date.date(), max_date.date()
         if range_choice == "自定义":
-            start_date = st.date_input("开始日期", min_value=min_date.date(), max_value=max_date.date())
-            end_date = st.date_input("结束日期", min_value=min_date.date(), max_value=max_date.date())
+            col6, col7 = st.columns([2, 2])
+            with col6:
+                start_date = st.date_input("开始日期", min_value=min_date.date(), max_value=max_date.date())
+            with col7:
+                end_date = st.date_input("结束日期", min_value=min_date.date(), max_value=max_date.date())
         elif range_choice == "最近30天":
             start_date = (datetime.now() - timedelta(days=30)).date()
         elif range_choice == "最近90天":
@@ -263,7 +271,7 @@ def main():
         csv_data = latest_df.to_csv(index=False, encoding='utf-8-sig') 
         st.download_button( "📥 导出最新价格数据", csv_data, "最新价格数据.csv", "text/csv", width='stretch')
 
-    st.divider()
+    # st.divider()
 
     filters = render_filters()
     df = query_sales_records(filters)
