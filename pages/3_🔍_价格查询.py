@@ -7,34 +7,44 @@ from core.database import get_connection
 # ==============================
 # ⚙️ 页面配置
 # ==============================
-st.logo(image='./assets/logo.png', icon_image='./assets/logo.png')
 st.set_page_config(page_title="价格查询中心", layout="wide")
+st.logo(image='./assets/logo.png', icon_image='./assets/logo.png')
 st.title("🔍 价格查询中心")
 
 # ==============================
-# 🔧 配置常量
+# ⚙️ 全局常量与缓存配置
 # ==============================
 PAGE_SIZE = 100
 CACHE_TTL = 600  # 缓存时间（秒）
 
 # ==============================
-# 📊 数据获取函数
+# 🔧 工具函数
+# ==============================
+def format_numeric_columns(df, cols):
+    """统一格式化数值列"""
+    for col in cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).round(2)
+    return df
+
+
+# ==============================
+# 📊 数据查询函数
 # ==============================
 @st.cache_data(ttl=CACHE_TTL)
 def get_date_range():
-    """获取数据库中的日期范围"""
     with get_connection() as conn:
-        res = pd.read_sql_query("""
-            SELECT MIN(record_date) AS min_date, MAX(record_date) AS max_date 
-            FROM sales_records WHERE record_date IS NOT NULL
-        """, conn)
+        res = pd.read_sql_query(
+            "SELECT MIN(record_date) AS min_date, MAX(record_date) AS max_date FROM sales_records WHERE record_date IS NOT NULL",
+            conn
+        )
         if not res.empty and res.min_date[0] and res.max_date[0]:
             return pd.to_datetime(res.min_date[0]), pd.to_datetime(res.max_date[0])
     return datetime.now() - timedelta(days=30), datetime.now()
 
+
 @st.cache_data(ttl=CACHE_TTL)
 def get_latest_prices():
-    """获取最新价格数据"""
     with get_connection() as conn:
         df = pd.read_sql_query("""
             WITH Latest AS (
@@ -44,7 +54,6 @@ def get_latest_prices():
                            ORDER BY record_date DESC
                        ) rn
                 FROM sales_records
-                WHERE unit_price > 0 AND quantity > 0
             )
             SELECT 
                 customer_name AS 客户名称,
@@ -56,53 +65,31 @@ def get_latest_prices():
                 quantity AS 数量,
                 ROUND(unit_price, 2) AS 单价,
                 ROUND(amount, 2) AS 金额,
+                COALESCE(NULLIF(ticket_number, ''), '无票号') AS 票据号,
+                COALESCE(NULLIF(remark, ''), '无备注') AS 备注,
+                production_line AS 生产线,
                 record_date AS 记录日期
-            FROM Latest 
-            WHERE rn = 1
+            FROM Latest WHERE rn = 1
             ORDER BY customer_name, color, record_date DESC
         """, conn)
-        
-        # 数值列处理
-        numeric_columns = ['数量', '单价', '金额']
-        for col in numeric_columns:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).round(2)
-        return df
+        return format_numeric_columns(df, ['数量', '单价', '金额'])
+
 
 @st.cache_data(ttl=CACHE_TTL)
-def get_unique_colors():
-    """获取所有唯一的颜色选项"""
-    query = """
-        SELECT DISTINCT color 
-        FROM sales_records 
-        WHERE color IS NOT NULL AND color != '' 
-        AND unit_price > 0 AND quantity > 0 AND amount > 0
-        ORDER BY color
-    """
-    with get_connection() as conn:
-        df = pd.read_sql_query(query, conn)
-        return df['color'].tolist()
-
-@st.cache_data(ttl=CACHE_TTL)
-def get_unique_grades():
-    """获取所有唯一的产品等级选项"""
-    query = """
+def get_unique_values(column):
+    query = f"""
         SELECT DISTINCT 
-            CASE 
-                WHEN grade IS NULL OR grade = '' THEN '(空)'
-                ELSE grade 
-            END as grade_display
-        FROM sales_records 
-        WHERE unit_price > 0 AND quantity > 0 AND amount > 0
-        ORDER BY grade_display
+            CASE WHEN {column} IS NULL OR {column} = '' THEN '(空)' ELSE {column} END AS val
+        FROM sales_records ORDER BY val
     """
     with get_connection() as conn:
         df = pd.read_sql_query(query, conn)
-        return df['grade_display'].tolist()
+    return df['val'].tolist()
+
 
 @st.cache_data(ttl=CACHE_TTL)
-def query_sales_records(customer=None, colors=None, grades=None, start_date=None, end_date=None):
-    """查询销售记录"""
+def query_sales_records(filters):
+    """根据筛选条件查询完整数据"""
     query = """
         SELECT 
             customer_name AS 客户名称,
@@ -115,278 +102,113 @@ def query_sales_records(customer=None, colors=None, grades=None, start_date=None
             ROUND(unit_price, 2) AS 单价,
             ROUND(amount, 2) AS 金额,
             COALESCE(NULLIF(ticket_number,''), '无票号') AS 票据号,
+            COALESCE(NULLIF(remark,''), '无备注') AS 备注,
+            COALESCE(NULLIF(production_line,''), '(空)') AS 生产线,
             record_date AS 记录日期
         FROM sales_records
-        WHERE unit_price > 0 AND quantity > 0 AND amount > 0
+        WHERE 1=1
     """
-    
-    params = []
-    conditions = []
-    
-    # 客户名称筛选
-    if customer and customer.strip():
-        conditions.append("(customer_name LIKE ? OR sub_customer_name LIKE ?)")
-        params.extend([f'%{customer.strip()}%', f'%{customer.strip()}%'])
-    
-    # 颜色筛选
-    if colors:
-        placeholders = ','.join(['?'] * len(colors))
+    params, conditions = [], []
+
+    if filters['customer']:
+        conditions.append("(customer_name LIKE ? OR sub_customer_name LIKE ? OR product_name LIKE ?)")
+        params += [f"%{filters['customer']}%"] * 3
+
+    if filters['colors']:
+        placeholders = ','.join(['?'] * len(filters['colors']))
         conditions.append(f"color IN ({placeholders})")
-        params.extend(colors)
-    
-    # 等级筛选
-    if grades:
-        grade_conditions = []
-        grade_params = []
-        for grade in grades:
-            if grade == '(空)':
-                grade_conditions.append("(grade IS NULL OR grade = '')")
+        params += filters['colors']
+
+    if filters['grades']:
+        grade_conds = []
+        for g in filters['grades']:
+            if g == '(空)':
+                grade_conds.append("(grade IS NULL OR grade='')")
             else:
-                grade_conditions.append("grade = ?")
-                grade_params.append(grade)
-        
-        if grade_conditions:
-            conditions.append("(" + " OR ".join(grade_conditions) + ")")
-            params.extend(grade_params)
-    
-    # 日期筛选
-    if start_date and end_date:
+                grade_conds.append("grade=?")
+                params.append(g)
+        conditions.append("(" + " OR ".join(grade_conds) + ")")
+
+    if filters['production_lines']:
+        line_conds = []
+        for l in filters['production_lines']:
+            if l == '(空)':
+                line_conds.append("(production_line IS NULL OR production_line='')")
+            else:
+                line_conds.append("production_line=?")
+                params.append(l)
+        conditions.append("(" + " OR ".join(line_conds) + ")")
+
+    if filters['start_date'] and filters['end_date']:
         conditions.append("record_date BETWEEN ? AND ?")
-        params.extend([start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')])
-    
-    # 构建完整查询
+        params += [filters['start_date'].strftime('%Y-%m-%d'), filters['end_date'].strftime('%Y-%m-%d')]
+
     if conditions:
         query += " AND " + " AND ".join(conditions)
-    
     query += " ORDER BY record_date DESC, customer_name, color"
-    
+
     with get_connection() as conn:
         df = pd.read_sql_query(query, conn, params=params)
-        
-        # 数值列处理
-        numeric_columns = ['数量', '单价', '金额']
-        for col in numeric_columns:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).round(2)
-        
-        return df
+        return format_numeric_columns(df, ['数量', '单价', '金额'])
+
 
 # ==============================
-# 🎛️ 界面组件函数
+# 🎛️ UI 部分
 # ==============================
-def render_latest_prices_section():
-    """渲染最新价格数据部分"""
-    st.markdown("### 📋 最新价格数据")
-    st.caption("展示每个客户及产品组合的最新成交价格")
-    
-    latest_df = get_latest_prices()
-    
-    if latest_df.empty:
-        st.info("暂无价格数据")
-        return
-    
-    # 显示数据表格
-    st.dataframe(
-        latest_df, 
-        use_container_width=True, 
-        height=400,
-        column_config={
-            "财务编号": st.column_config.TextColumn(width="small"),
-            "产品颜色": st.column_config.TextColumn(width="small"),
-            "数量": st.column_config.NumberColumn(width="small"),
-            "等级": st.column_config.TextColumn(width="small"),
-            "记录日期": st.column_config.DateColumn(width="small"),
-            "单价": st.column_config.NumberColumn(format="¥%.2f", width="small"),
-            "金额": st.column_config.NumberColumn(format="¥%.2f", width="small"),
-        }
-    )
-    
-    # 统计和导出
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown(f"**共 {len(latest_df):,} 条记录**")
-    with col2:
-        csv_data = latest_df.to_csv(index=False, encoding='utf-8-sig')
-        st.download_button(
-            "📥 导出最新价格数据",
-            csv_data,
-            "最新价格数据.csv",
-            "text/csv",
-            use_container_width=True
-        )
+def render_filters():
+    """筛选区"""
+    with st.expander("🎛️ 高级筛选条件", expanded=False):
+        color_opts = get_unique_values("color")
+        grade_opts = get_unique_values("grade")
+        line_opts = get_unique_values("production_line")
+        min_date, max_date = get_date_range()
 
-def render_query_filters():
-    """渲染查询筛选条件"""
-    st.markdown("### 🎛️ 高级数据查询")
-    st.caption("根据客户、产品、时间范围等条件筛选历史销售记录")
-    
-    # 获取筛选选项
-    color_options = get_unique_colors()
-    grade_options = get_unique_grades()
-    min_date, max_date = get_date_range()
-    
-    # 筛选条件布局
-    col1, col2, col3, col4 = st.columns([2, 2, 1.5, 1.5])
-    
-    with col1:
-        customer_filter = st.text_input(
-            "客户名称", 
-            placeholder="输入客户名称（支持模糊匹配）",
-            help="可以输入客户名称或子客户名称进行搜索"
-        )
-    
-    with col2:
-        color_filter = st.multiselect(
-            "产品颜色",
-            options=color_options,
-            placeholder="选择颜色（可多选）",
-            help="可多选，不选表示所有颜色"
-        )
-    
-    with col3:
-        grade_filter = st.multiselect(
-            "产品等级", 
-            options=grade_options,
-            placeholder="选择等级（可多选）",
-            help="可多选，不选表示所有等级"
-        )
-    
-    with col4:
-        time_range = st.selectbox(
-            "时间范围",
-            options=["最近30天", "最近90天", "最近半年", "全部时间", "自定义"],
-            help="选择查询的时间范围"
-        )
-    
-    # 日期选择
-    start_date, end_date = min_date.date(), max_date.date()
-    
-    if time_range == "自定义":
-        col5, col6 = st.columns(2)
+        col1, col2, col3 = st.columns([2, 2, 1.5])
+        with col1:
+            customer = st.text_input("客户/产品名称", placeholder="支持模糊匹配")
+        with col2:
+            colors = st.multiselect("产品颜色", color_opts, placeholder="支持颜色多选")
+        with col3:
+            grades = st.multiselect("产品等级", grade_opts, placeholder="支持等级多选")
+
+        col4, col5 = st.columns([2, 1])
+        with col4:
+            lines = st.multiselect("生产线", line_opts, placeholder="支持生产线多选")
         with col5:
-            start_date = st.date_input(
-                "开始日期", 
-                min_date.date(), 
-                min_value=min_date.date(), 
-                max_value=max_date.date()
+            range_choice = st.selectbox(
+                "时间范围",
+                ["最近30天", "最近90天", "最近半年", "全部时间", "自定义"],
             )
-        with col6:
-            end_date = st.date_input(
-                "结束日期", 
-                max_date.date(), 
-                min_value=min_date.date(), 
-                max_value=max_date.date()
-            )
-    elif time_range == "最近30天":
-        start_date = (datetime.now() - timedelta(days=30)).date()
-    elif time_range == "最近90天":
-        start_date = (datetime.now() - timedelta(days=90)).date()
-    elif time_range == "最近半年":
-        start_date = (datetime.now() - timedelta(days=180)).date()
-    
-    return {
-        'customer': customer_filter.strip() if customer_filter else None,
-        'colors': color_filter if color_filter else None,
-        'grades': grade_filter if grade_filter else None,
-        'start_date': start_date,
-        'end_date': end_date
-    }
 
-def render_query_results(df):
-    """渲染查询结果"""
-    if df.empty:
-        st.info("📭 未找到匹配的销售记录")
-        return
-    
-    # 搜索过滤
-    search_term = st.text_input(
-        "🔍 快速搜索", 
-        placeholder="输入关键词过滤结果（客户、产品、颜色、票据号等）",
-        help="在所有列中进行模糊搜索，支持数字和中文混合搜索"
-    )
-    
-    if search_term:
-        # 改进的搜索逻辑，处理数字和中文混合的情况
-        def search_row(row):
-            try:
-                # 将行数据转换为字符串并进行搜索
-                row_str = ' '.join([str(x) for x in row if pd.notna(x)])
-                return search_term.lower() in row_str.lower()
-            except:
-                return False
-        
-        df_filtered = df[df.apply(search_row, axis=1)]
-    else:
-        df_filtered = df
-    
-    # 分页控制
-    total_pages = max(1, math.ceil(len(df_filtered) / PAGE_SIZE))
-    
-    # 初始化页码
-    if "current_page" not in st.session_state:
-        st.session_state.current_page = 1
-    
-    # 确保页码有效
-    current_page = min(st.session_state.current_page, total_pages)
-    if current_page < 1:
-        current_page = 1
-    
-    # 分页数据
-    start_idx = (current_page - 1) * PAGE_SIZE
-    end_idx = start_idx + PAGE_SIZE
-    page_data = df_filtered.iloc[start_idx:end_idx]
-    
-    # 显示结果统计
-    st.markdown(f"#### 📋 查询结果（共 {len(df_filtered):,} 条记录）")
-    
-    if page_data.empty:
-        st.warning("当前页面无数据")
-    else:
-        # 显示数据表格
-        st.dataframe(
-            page_data,
-            use_container_width=True,
-            height=400,
-            column_config={
-                "财务编号": st.column_config.TextColumn(width="small"),
-                "产品颜色": st.column_config.TextColumn(width="small"),
-                "数量": st.column_config.NumberColumn(width="small"),
-                "等级": st.column_config.TextColumn(width="small"),
-                "记录日期": st.column_config.DateColumn(width="small"),
-                "单价": st.column_config.NumberColumn(format="¥%.2f", width="small"),
-                "金额": st.column_config.NumberColumn(format="¥%.2f", width="small"),
-                "票据号": st.column_config.TextColumn(width="small"),
-            }
+        start_date, end_date = min_date.date(), max_date.date()
+        if range_choice == "自定义":
+            start_date = st.date_input("开始日期", min_value=min_date.date(), max_value=max_date.date())
+            end_date = st.date_input("结束日期", min_value=min_date.date(), max_value=max_date.date())
+        elif range_choice == "最近30天":
+            start_date = (datetime.now() - timedelta(days=30)).date()
+        elif range_choice == "最近90天":
+            start_date = (datetime.now() - timedelta(days=90)).date()
+        elif range_choice == "最近半年":
+            start_date = (datetime.now() - timedelta(days=180)).date()
+
+        return dict(
+            customer=customer.strip() if customer else None,
+            colors=colors or None,
+            grades=grades or None,
+            production_lines=lines or None,
+            start_date=start_date,
+            end_date=end_date
         )
-    
-    # 分页控制器
-    render_pagination_controls(current_page, total_pages, len(df_filtered))
-    
-    # 汇总统计
-    render_summary_stats(df_filtered)
-    
-    # 导出功能
-    if not df_filtered.empty:
-        csv_data = df_filtered.to_csv(index=False, encoding='utf-8-sig')
-        st.download_button(
-            "📥 导出筛选结果",
-            csv_data,
-            "销售记录查询结果.csv",
-            "text/csv",
-            use_container_width=True
-        )
+
 
 def render_pagination_controls(current_page, total_pages, total_records):
-    """渲染分页控制器"""
-    col1, col2 = st.columns([2, .5])
-    
+    """分页样式"""
+    col1, col2 = st.columns([2.5, 0.3])
     with col1:
         st.caption(f"第 {current_page} / {total_pages} 页，共 {total_records:,} 条记录")
-    
     with col2:
-        # 页码跳转
         new_page = st.number_input(
-            "跳转到",
+            "页码",
             min_value=1,
             max_value=total_pages,
             value=current_page,
@@ -397,54 +219,56 @@ def render_pagination_controls(current_page, total_pages, total_records):
             st.session_state.current_page = new_page
             st.rerun()
 
-def render_summary_stats(df):
-    """渲染汇总统计"""
+
+def render_results(df):
+    """结果展示与分页"""
     if df.empty:
+        st.info("📭 未找到匹配记录")
         return
-    
-    st.markdown("#### 📊 汇总指标")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        avg_price = df['单价'].mean()
-        st.metric("平均单价", f"¥{avg_price:.2f}" if not pd.isna(avg_price) else "¥0.00")
-    
-    with col2:
-        total_amount = df['金额'].sum()
-        st.metric("总金额", f"¥{total_amount:,.2f}" if total_amount > 0 else "¥0.00")
-    
-    with col3:
-        total_quantity = df['数量'].sum()
-        st.metric("总数量", f"{total_quantity:,.0f}" if total_quantity > 0 else "0")
-    
-    with col4:
-        unique_customers = df['客户名称'].nunique()
-        st.metric("客户数量", f"{unique_customers}")
+
+    search_term = st.text_input("🔍 快速搜索", placeholder="输入客户、颜色、备注等关键字筛选")
+    if search_term:
+        df = df[df.apply(lambda r: search_term.lower() in ' '.join(r.astype(str).values).lower(), axis=1)]
+
+    total_pages = max(1, math.ceil(len(df) / PAGE_SIZE))
+    current_page = st.session_state.get("current_page", 1)
+    current_page = max(1, min(current_page, total_pages))
+
+    start_idx, end_idx = (current_page - 1) * PAGE_SIZE, current_page * PAGE_SIZE
+    page_data = df.iloc[start_idx:end_idx]
+
+    st.markdown(f"#### 📋 查询结果（共 {len(df):,} 条记录）")
+    st.dataframe(page_data, width='stretch')
+
+    render_pagination_controls(current_page, total_pages, len(df))
+
+    csv_data = df.to_csv(index=False, encoding='utf-8-sig')
+    st.download_button("📥 导出查询结果", csv_data, "销售记录查询结果.csv", "text/csv", width='stretch')
+
 
 # ==============================
 # 🚀 主程序
 # ==============================
 def main():
-    # 最新价格数据部分
-    render_latest_prices_section()
-    
-    st.markdown("---")
-    
-    # 高级查询部分
-    filters = render_query_filters()
-    
-    # 执行查询（自动）
-    df = query_sales_records(
-        customer=filters['customer'],
-        colors=filters['colors'], 
-        grades=filters['grades'],
-        start_date=filters['start_date'],
-        end_date=filters['end_date']
-    )
-    
-    # 显示查询结果
-    render_query_results(df)
+    st.subheader("📋 最新价格数据")
+    latest_df = get_latest_prices()
+    st.dataframe(latest_df, width='stretch')
+
+    # 统计和导出 
+    col1, col2 = st.columns([4, .75]) 
+    with col1: 
+        st.caption(f"共 {len(latest_df):,} 条记录")
+
+    with col2: 
+        csv_data = latest_df.to_csv(index=False, encoding='utf-8-sig') 
+        st.download_button( "📥 导出最新价格数据", csv_data, "最新价格数据.csv", "text/csv", width='stretch')
+
+    st.divider()
+
+    filters = render_filters()
+    df = query_sales_records(filters)
+    render_results(df)
+
 
 if __name__ == "__main__":
     main()
