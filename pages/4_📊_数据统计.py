@@ -30,7 +30,7 @@ try:
         with col1:
             st.metric("总记录数", stats['total_records'])
         with col2:
-            st.metric("唯一客户", stats['unique_customers'])
+            st.metric("主客户", stats['main_customers'])
         with col3:
             st.metric("子客户数", stats['sub_customers'])
         with col4:
@@ -58,14 +58,15 @@ try:
         with col10:
             total_amount = stats.get('total_amount', 0)
             st.metric("总金额", f"¥{total_amount:,.2f}")
-        with col11:
-            # 计算平均交易金额
-            avg_amount = total_amount / stats['total_records'] if stats['total_records'] > 0 else 0
-            st.metric("平均交易金额", f"¥{avg_amount:,.2f}")
-        with col12:
-            # 计算客单价
-            avg_customer_amount = total_amount / stats['unique_customers'] if stats['unique_customers'] > 0 else 0
-            st.metric("客单价", f"¥{avg_customer_amount:,.2f}")
+        # with col11:
+        #     # 计算平均交易金额
+        #     avg_amount = total_amount / stats['total_records'] if stats['total_records'] > 0 else 0
+        #     st.metric("平均交易金额", f"¥{avg_amount:,.2f}")
+        # with col12:
+        #     # 计算客单价
+        #     avg_customer_amount = total_amount / stats['sub_customers'] if stats['sub_customers'] > 0 else 0
+        #     st.metric("客单价", f"¥{avg_customer_amount:,.2f}")
+        #     pass
         
         # 金额分析
         st.markdown("---")
@@ -585,22 +586,6 @@ try:
             see_data = st.expander('查看月度详细数据 👉')
             with see_data:
                 st.dataframe(data=display_monthly.round(2).reset_index(drop=True))
-                # 计算最近三个月变化
-                # if len(monthly_trend) >= 3:
-                #     recent = monthly_trend.tail(3)
-                #     diff_amount = recent.iloc[-1]['total_amount'] - recent.iloc[0]['total_amount']
-                #     pct_change = (diff_amount / recent.iloc[0]['total_amount']) * 100 if recent.iloc[0]['total_amount'] else 0
-
-                #     if pct_change > 10:
-                #         trend_text = f"📈 最近三个月销售额持续上升，增长约 **{pct_change:.1f}%**，业务保持良好增长态势。"
-                #     elif pct_change < -10:
-                #         trend_text = f"📉 最近三个月销售额下降约 **{abs(pct_change):.1f}%**，建议关注市场变化或客户流失。"
-                #     else:
-                #         trend_text = f"⚖️ 最近三个月销售额波动较小，整体保持稳定。"
-                # else:
-                #     trend_text = "📊 当前数据不足以进行趋势对比分析。"
-
-                # st.info(trend_text)
         else:
             st.info("暂无足够的时间趋势数据")
 

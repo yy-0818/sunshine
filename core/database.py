@@ -150,53 +150,50 @@ def _check_and_alter_tables(cursor):
                 logger.warning(f"列 {table}.{column} 添加失败: {e}")
 
 def get_database_status():
-    """获取数据库状态"""
+    """获取数据库状态，统一统计关键指标"""
     status = {}
-    
     with get_connection() as conn:
-        try:
-            # 使用单个查询获取所有表记录数
-            table_counts = pd.read_sql_query('''
-                SELECT 
-                    (SELECT COUNT(*) FROM customers) as customers_count,
-                    (SELECT COUNT(*) FROM sales_records) as sales_records_count,
-                    (SELECT COUNT(*) FROM price_change_history) as price_change_history_count,
-                    (SELECT COUNT(DISTINCT color) FROM sales_records) as unique_colors,
-                    (SELECT COUNT(DISTINCT product_name) FROM sales_records) as unique_products,
-                    (SELECT COUNT(DISTINCT color || product_name) FROM sales_records) as unique_combinations,
-                    (SELECT COUNT(DISTINCT customer_name || finance_id) FROM customers) as unique_customers
-            ''', conn).iloc[0]
-            
-            status.update({
-                'customers_count': table_counts['customers_count'],
-                'sales_records_count': table_counts['sales_records_count'],
-                'price_change_history_count': table_counts['price_change_history_count'],
-                'unique_colors': table_counts['unique_colors'],
-                'unique_products': table_counts['unique_products'],
-                'unique_combinations': table_counts['unique_combinations'],
-                'customers_count': table_counts['unique_customers'],
-                'product_prices_count': table_counts['sales_records_count']
-            })
-            
-        except Exception as e:
-            logger.error(f"获取数据库状态失败: {e}")
-            # 设置默认值
-            default_values = {
-                'customers_count': 0, 'sales_records_count': 0, 'price_change_history_count': 0,
-                'unique_colors': 0, 'unique_products': 0, 'unique_combinations': 0,
-                'customers_count': 0, 'product_prices_count': 0
-            }
-            status.update(default_values)
-        
+        cursor = conn.cursor()
+
+        # 销售记录数量
+        cursor.execute("SELECT COUNT(*) FROM sales_records")
+        status['sales_records_count'] = cursor.fetchone()[0]
+
+        # 总销售金额
+        cursor.execute("SELECT SUM(unit_price) FROM sales_records")
+        status['total_sales'] = cursor.fetchone()[0]
+
+        # 价格变更记录数量
+        cursor.execute("SELECT COUNT(*) FROM price_change_history")
+        status['price_change_history_count'] = cursor.fetchone()[0]
+
         # 数据库大小
+        import os
         try:
-            db_size = os.path.getsize(DB_CONFIG['database']) / 1024 / 1024
-            status['db_size_mb'] = round(db_size, 2)
-        except Exception as e:
-            logger.error(f"获取数据库大小失败: {e}")
-            status['db_size_mb'] = 0
-    
+            db_size = os.path.getsize("ceramic_prices.db") / 1024 / 1024
+        except:
+            db_size = 0
+        status['db_size_mb'] = round(db_size, 2)
+
+        # 子客户数（唯一 sub_customer_name 不为空的计数）
+        cursor.execute("SELECT COUNT(DISTINCT sub_customer_name) FROM customers WHERE sub_customer_name IS NOT NULL")
+        status['sub_customers'] = cursor.fetchone()[0]
+
+        # 主客户数（唯一 customer_name）
+        cursor.execute("SELECT COUNT(DISTINCT customer_name) FROM customers")
+        status['main_customers'] = cursor.fetchone()[0]
+
+        # 产品颜色数
+        cursor.execute("SELECT COUNT(DISTINCT color) FROM sales_records")
+        status['unique_colors'] = cursor.fetchone()[0]
+
+        # 产品数
+        cursor.execute("SELECT COUNT(DISTINCT product_name) FROM sales_records")
+        status['unique_products'] = cursor.fetchone()[0]
+
     return status
+
+
 
 def optimize_database():
     """优化数据库"""

@@ -41,7 +41,7 @@ def render_dashboard():
         # 关键指标
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("客户数量", status.get('customers_count', 0))
+            st.metric("客户数量", status.get('sub_customers', 0))
         with col2:
             st.metric("销售记录", status.get('sales_records_count', 0))
         with col3:
@@ -134,7 +134,7 @@ def render_sidebar_status():
         
         col1, col2 = st.sidebar.columns(2)
         with col1:
-            st.metric("客户", status.get('customers_count', 0))
+            st.metric("客户", status.get('sub_customers', 0))
         with col2:
             st.metric("销售记录", status.get('sales_records_count', 0))
         

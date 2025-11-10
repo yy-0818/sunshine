@@ -44,7 +44,7 @@ def render_database_status():
     if db_status:
         cols = st.columns(4)
         metrics = [
-            ("客户数量", db_status.get('customers_count', 0)),
+            ("客户数量", db_status.get('sub_customers', 0)),
             ("销售记录", db_status.get('sales_records_count', 0)),
             ("产品种类", db_status.get('unique_products', 0)),
             ("颜色种类", db_status.get('unique_colors', 0))
@@ -129,11 +129,11 @@ def main():
         ok, preview = preview_excel_data(temp_path, 5)
         if ok:
             st.subheader("👀 数据预览 (前5行)")
-            st.dataframe(preview, use_container_width=True)
+            st.dataframe(preview, width='stretch')
 
         # 导入执行
         st.markdown("---")
-        if st.button("🚀 开始导入", use_container_width=True, type="primary"):
+        if st.button("🚀 开始导入", width='stretch', type="primary"):
             execute_import(temp_path, strategy, replace_confirm)
 
     finally:

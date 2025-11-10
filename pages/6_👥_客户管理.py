@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from core.database import get_connection
+from core.database import get_connection, get_database_status
 
 st.logo(
     image='./assets/logo.png',
@@ -86,6 +86,7 @@ def add_new_customer(customer_data):
 
 # 加载数据
 customers_df = load_customer_data()
+status = get_database_status()
 
 # 新增客户对话框
 @st.dialog("新增客户信息",width="medium")
@@ -188,8 +189,7 @@ else:
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        total_customers = len(customers_df)
-        st.metric("总客户记录", total_customers)
+        col1.metric("总客户数", status["sub_customers"])
     
     with col2:
         active_mask = customers_df['是否活跃'].apply(
@@ -197,14 +197,13 @@ else:
         )
         active_count = active_mask.sum()
         st.metric("活跃客户", active_count)
+        # col2.metric("活跃客户", status["active_customers"])
     
     with col3:
-        main_customers = len(customers_df[customers_df['子客户名称'] == ''])
-        st.metric("主客户数", main_customers)
+        st.metric("主客户数", status["main_customers"])
     
     with col4:
-        sub_customers = len(customers_df[customers_df['子客户名称'] != ''])
-        st.metric("子客户数", sub_customers)
+        st.metric("子客户数", status["sub_customers"])
 
     # 客户查询
     st.subheader("🔍 客户查询")
