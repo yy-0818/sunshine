@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import os
 from core.import_service import ImportService
-from utils.file_utils import validate_excel_structure, preview_excel_data, get_excel_file_info, validate_data_quality
-from core.database import clear_database, get_database_status
+from utils.file_utils import validate_excel_structure, preview_excel_data
+from core.database import get_database_status
 
 # 页面配置
 st.set_page_config(page_title="数据导入", layout="wide")
@@ -31,12 +31,10 @@ STRATEGY_CONFIG = {
     }
 }
 
-
 @st.cache_data(ttl=300)
 def get_current_db_status():
     """获取当前数据库状态"""
     return get_database_status()
-
 
 def render_database_status():
     """渲染数据库状态"""
@@ -53,18 +51,55 @@ def render_database_status():
             with col:
                 st.metric(label, value)
 
+def show_example_format():
+    """显示表格格式示例"""
+    with st.expander("📋 查看Excel表格格式要求", expanded=False):
+        st.info("请确保您的Excel文件包含以下列，并按照此格式组织数据：")
+        
+        # 创建示例数据
+        example_data = {
+            "客户名称": ["衡阳张三", "衡阳张三"],
+            "编号": [1, 1],
+            "子客户名称": ["衡阳张三", "衡阳李四"],
+            "年": [25, 25],
+            "月": [1, 1],
+            "日": [1, 1],
+            "收款金额": ["", ""],
+            "颜色": ["福迩家罗曼瓦290*420孔雀兰", "福迩家罗曼瓦290*420中国红"],
+            "等级": ["优", "优"],
+            "数量": [12800, 15000],
+            "单价": [1.7, 1.8],
+            "金额": [21760, 27000],
+            "余额": ["", ""],
+            "票号": ["0618YG049", "0619YG050"],
+            "备注": ["", ""],
+            "生产线": ["三线罗曼瓦", "三线罗曼瓦"]
+        }
+        
+        example_df = pd.DataFrame(example_data)
+        st.dataframe(example_df, use_container_width=True)
+        
+        # 添加格式要求说明
+        st.markdown("""
+        **📝 格式要求说明：**
+        - 必须包含以上所有列标题
+        - 列顺序可以调整，但列名必须一致
+        - 日期请分别填入年、月、日列
+        - 可以为空的列：打款、余额、备注
+        - 数值列：数量、单价、金额必须为有效数字
+        """)
 
 def execute_import(file_path, strategy, replace_confirm):
     """执行数据导入"""
     if strategy == "replace" and not replace_confirm:
         st.error("请确认执行完全覆盖操作！")
         return
-
+    
     with st.spinner("正在导入数据，请稍候..."):
         success, message = import_service.import_excel_data(
             file_path, "user", update_strategy=strategy
         )
-
+    
     if success:
         st.success("✅ 导入成功！")
         st.info(message)
@@ -74,14 +109,20 @@ def execute_import(file_path, strategy, replace_confirm):
     else:
         st.error(f"❌ 导入失败：{message}")
 
-
 def main():
+    # 显示数据库状态
+    st.markdown("### 🗃️ 当前数据库状态")
     render_database_status()
-
-    st.markdown("### 📋 导入策略选择")
-
+    
+    # 显示表格格式示例
+    show_example_format()
+    
+    st.markdown("### ⚙️ 导入配置")
+    
     # 策略展示
+    st.markdown("#### 📋 导入策略选择")
     cols = st.columns(2)
+    
     for i, (key, cfg) in enumerate(STRATEGY_CONFIG.items()):
         with cols[i]:
             st.markdown(
@@ -94,52 +135,98 @@ def main():
                 """,
                 unsafe_allow_html=True
             )
-
+    
     # 选择框
     strategy = st.radio(
         "选择导入模式：",
         options=list(STRATEGY_CONFIG.keys()),
         format_func=lambda x: f"{STRATEGY_CONFIG[x]['icon']} {STRATEGY_CONFIG[x]['name']}",
-        horizontal=True
+        horizontal=True,
+        key="strategy_selector"
     )
-
+    
     # 替换确认
     replace_confirm = True
     if strategy == "replace":
-        st.warning("⚠️ 完全覆盖模式会清空所有数据，请谨慎操作！")
-        replace_confirm = st.checkbox("我已备份数据，并确认执行", value=False)
-
-    uploaded_file = st.file_uploader("📤 上传 Excel 文件", type=['xlsx', 'xls'])
+        st.warning("""
+        ⚠️ **完全覆盖模式警告**
+        - 此操作会清空数据库中的所有现有数据
+        - 操作不可恢复，请确保已备份重要数据
+        - 导入完成后需要重新设置系统参数
+        """)
+        replace_confirm = st.checkbox("我已备份数据，并确认执行完全覆盖操作", value=False)
+    
+    # 文件上传区域
+    st.markdown("#### 📤 文件上传")
+    uploaded_file = st.file_uploader(
+        "上传 Excel 文件", 
+        type=['xlsx', 'xls'],
+        help="请上传符合格式要求的Excel文件，支持 .xlsx 和 .xls 格式"
+    )
+    
     if not uploaded_file:
-        st.info("请上传文件以开始导入")
+        st.info("👆 请上传Excel文件以开始导入流程")
         return
-
+    
+    # 临时保存文件
     temp_path = "temp_upload.xlsx"
     with open(temp_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
-
+    
     try:
         # 文件验证
-        valid, msg = validate_excel_structure(temp_path)
-        if not valid:
-            st.error(msg)
-            return
-
+        st.markdown("#### 🔍 文件验证")
+        with st.status("正在验证文件格式...", expanded=True) as status:
+            valid, msg = validate_excel_structure(temp_path)
+            if not valid:
+                st.error(f"❌ 文件验证失败：{msg}")
+                status.update(label="文件验证失败", state="error", expanded=False)
+                return
+            else:
+                st.success("✅ 文件格式验证通过")
+                status.update(label="文件验证完成", state="complete", expanded=False)
+        
         # 数据预览
+        st.markdown("#### 👀 数据预览")
         ok, preview = preview_excel_data(temp_path, 5)
         if ok:
-            st.subheader("👀 数据预览 (前5行)")
-            st.dataframe(preview, width='stretch')
-
-        # 导入执行
+            st.success(f"成功读取数据，共 {len(preview)} 行记录")
+            st.dataframe(preview, use_container_width=True)
+            
+            # 显示数据统计
+            cols = st.columns(3)
+            with cols[0]:
+                st.metric("预览行数", len(preview))
+            with cols[1]:
+                st.metric("总列数", len(preview.columns))
+            with cols[2]:
+                st.metric("文件大小", f"{uploaded_file.size / 1024:.1f} KB")
+        else:
+            st.error("❌ 数据预览失败")
+            return
+        
+        # 导入执行区域
         st.markdown("---")
-        if st.button("🚀 开始导入", width='stretch', type="primary"):
+        st.markdown("#### 🚀 执行导入")
+        
+        if strategy == "replace" and not replace_confirm:
+            st.error("请先确认完全覆盖操作")
+            return
+            
+        if st.button(
+            "开始导入数据", 
+            type="primary", 
+            use_container_width=True,
+            key="import_button"
+        ):
             execute_import(temp_path, strategy, replace_confirm)
-
+            
+    except Exception as e:
+        st.error(f"❌ 处理文件时发生错误：{str(e)}")
     finally:
+        # 清理临时文件
         if os.path.exists(temp_path):
             os.remove(temp_path)
-
 
 if __name__ == "__main__":
     main()

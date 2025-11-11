@@ -4,7 +4,7 @@ from openpyxl import load_workbook
 from typing import Tuple, Dict, Any
 
 def validate_excel_structure(file_path: str) -> Tuple[bool, str]:
-    """验证Excel文件结构"""
+    """验证Excel文件结构并进行表头映射"""
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -19,9 +19,39 @@ def validate_excel_structure(file_path: str) -> Tuple[bool, str]:
             
             wb.close()
             
-            # 必需的表头
-            required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '颜色', '等级', '数量', '单价', '金额', '备注']
-            missing_headers = [h for h in required_headers if h not in headers]
+            # 定义表头映射关系：原始表头 -> 标准表头
+            header_mapping = {
+                '备注（小客户名称）': '子客户名称',
+                '票 号': '票号',  # 统一空格处理
+                '品牌': '备注'   # 将"品牌"映射为"备注"
+            }
+            
+            # 应用表头映射
+            mapped_headers = []
+            for header in headers:
+                # 先去除空格进行匹配
+                header_no_space = header.replace(' ', '')
+                mapped_header = header
+                
+                # 检查是否有映射关系
+                for original, standard in header_mapping.items():
+                    if header_no_space == original.replace(' ', ''):
+                        mapped_header = standard
+                        break
+                
+                mapped_headers.append(mapped_header)
+            
+            # 必需的表头（映射后的标准表头）
+            required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '收款金额', '颜色', '等级', '数量', '单价', '金额', '余额', '票号', '备注', '生产线']
+            
+            # 去除空格后的表头用于匹配
+            mapped_headers_no_space = [h.replace(' ', '') for h in mapped_headers]
+            required_headers_no_space = [h.replace(' ', '') for h in required_headers]
+            
+            missing_headers = []
+            for req_header, req_header_ns in zip(required_headers, required_headers_no_space):
+                if req_header_ns not in mapped_headers_no_space:
+                    missing_headers.append(req_header)
             
             if missing_headers:
                 return False, f"缺少必要的表头: {missing_headers}"
@@ -32,33 +62,86 @@ def validate_excel_structure(file_path: str) -> Tuple[bool, str]:
         return False, f"文件检查失败: {str(e)}"
 
 def preview_excel_data(file_path: str, nrows: int = 5) -> Tuple[bool, pd.DataFrame]:
-    """预览Excel数据"""
+    """预览Excel数据（应用表头映射）"""
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
+            
+            # 先读取原始数据
             df = pd.read_excel(file_path, engine='openpyxl', nrows=nrows)
+            
+            # 应用表头映射
+            df = apply_header_mapping(df)
+            
         return True, df
     except Exception as e:
         return False, f"无法读取文件: {str(e)}"
 
+def apply_header_mapping(df: pd.DataFrame) -> pd.DataFrame:
+    """应用表头映射到DataFrame"""
+    # 定义表头映射关系
+    header_mapping = {
+        '备注（小客户名称）': '子客户名称',
+        '票 号': '票号',
+        '品牌': '备注'
+    }
+    
+    # 创建新的列名列表
+    new_columns = []
+    for col in df.columns:
+        original_col = str(col).strip()
+        # 去除空格进行匹配
+        original_col_no_space = original_col.replace(' ', '')
+        mapped_col = original_col
+        
+        # 检查映射关系
+        for original, standard in header_mapping.items():
+            if original_col_no_space == original.replace(' ', ''):
+                mapped_col = standard
+                break
+        
+        new_columns.append(mapped_col)
+    
+    # 应用新的列名
+    df_mapped = df.copy()
+    df_mapped.columns = new_columns
+    
+    return df_mapped
+
 def get_excel_file_info(file_path: str) -> Dict[str, Any]:
-    """获取Excel文件的详细信息"""
+    """获取Excel文件的详细信息（应用表头映射）"""
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             wb = load_workbook(file_path, data_only=True, read_only=True)
             sheet = wb.active
             
-            # 获取表头
-            headers = []
+            # 获取原始表头
+            original_headers = []
             for cell in sheet[1]:
                 if cell.value is not None:
-                    headers.append(str(cell.value).strip())
+                    original_headers.append(str(cell.value).strip())
+            
+            # 应用表头映射
+            mapped_headers = []
+            header_mapping = {
+                '备注（小客户名称）': '子客户名称',
+                '票 号': '票号',
+                '品牌': '备注'
+            }
+            
+            for header in original_headers:
+                header_no_space = header.replace(' ', '')
+                mapped_header = header
+                for original, standard in header_mapping.items():
+                    if header_no_space == original.replace(' ', ''):
+                        mapped_header = standard
+                        break
+                mapped_headers.append(mapped_header)
             
             # 统计行数（不包括表头）
             row_count = 0
             for row_idx, row in enumerate(sheet.iter_rows(min_row=2, max_row=100000), 2):
-                # 检查第一列是否有数据
                 if row[0].value is not None:
                     row_count += 1
                 else:
@@ -66,24 +149,42 @@ def get_excel_file_info(file_path: str) -> Dict[str, Any]:
             
             wb.close()
             
-            # 读取数据获取更多统计信息
-            df = pd.read_excel(file_path, engine='openpyxl', nrows=1000)  # 只读前1000行用于统计
+            # 读取数据并应用表头映射
+            df = pd.read_excel(file_path, engine='openpyxl', nrows=1000)
+            df = apply_header_mapping(df)
+            
+            # 创建去除空格后的列名映射
+            column_mapping = {}
+            for col in df.columns:
+                col_no_space = col.replace(' ', '')
+                column_mapping[col_no_space] = col
             
             info = {
-                "headers": headers,
+                "original_headers": original_headers,
+                "mapped_headers": mapped_headers,
+                "headers": mapped_headers,  # 保持兼容性
                 "row_count": row_count,
-                "column_count": len(headers),
-                "required_headers_present": all(h in headers for h in ['客户名称', '编号', '子客户名称', '年', '月', '日', '颜色', '等级', '数量', '单价', '金额', '备注']),
-                "sample_data_available": len(df) > 0 if not df.empty else False
+                "column_count": len(mapped_headers),
+                "required_headers_present": True,
+                "sample_data_available": len(df) > 0 if not df.empty else False,
+                "column_mapping": column_mapping
             }
             
             # 如果数据不为空，添加更多统计信息
             if not df.empty:
+                # 使用映射后的列名
+                customer_col = '客户名称'
+                product_col = '产品名称' if '产品名称' in df.columns else None
+                color_col = '颜色'
+                quantity_col = '数量'
+                price_col = '单价'
+                amount_col = '金额'
+                
                 info.update({
-                    "customer_count": df['客户名称'].nunique() if '客户名称' in df.columns else 0,
-                    "product_count": df['产品名称'].nunique() if '产品名称' in df.columns else 0,
-                    "color_count": df['颜色'].nunique() if '颜色' in df.columns else 0,
-                    "has_numeric_data": any(col in df.columns for col in ['数量', '单价', '金额'])
+                    "customer_count": df[customer_col].nunique() if customer_col in df.columns else 0,
+                    "product_count": df[product_col].nunique() if product_col and product_col in df.columns else 0,
+                    "color_count": df[color_col].nunique() if color_col in df.columns else 0,
+                    "has_numeric_data": any(col in df.columns for col in [quantity_col, price_col, amount_col])
                 })
             
             return info
@@ -132,47 +233,54 @@ def get_import_strategy_description(strategy: str) -> Dict[str, Any]:
     return descriptions.get(strategy, descriptions["update"])
 
 def validate_data_quality(df: pd.DataFrame) -> Dict[str, Any]:
-    """验证数据质量"""
+    """验证数据质量（使用映射后的列名）"""
     issues = []
     warnings = []
+    
+    # 应用表头映射
+    df_mapped = apply_header_mapping(df)
+    
+    # 创建去除空格后的列名映射
+    column_mapping = {}
+    for col in df_mapped.columns:
+        col_no_space = col.replace(' ', '')
+        column_mapping[col_no_space] = col
     
     # 检查必需字段的空值
     required_fields = ['客户名称', '编号']
     for field in required_fields:
-        if field in df.columns:
-            null_count = df[field].isnull().sum()
+        actual_col = column_mapping.get(field, field)
+        if actual_col in df_mapped.columns:
+            null_count = df_mapped[actual_col].isnull().sum()
             if null_count > 0:
-                issues.append(f"字段 '{field}' 有 {null_count} 个空值")
+                issues.append(f"字段 '{actual_col}' 有 {null_count} 个空值")
     
     # 检查数值字段的有效性
-    numeric_fields = ['数量', '单价', '金额']
+    numeric_fields = ['数量', '单价', '金额', '收款金额']
     for field in numeric_fields:
-        if field in df.columns:
-            # # 检查负值
-            # negative_count = (df[field] < 0).sum()
-            # if negative_count > 0:
-            #     warnings.append(f"字段 '{field}' 有 {negative_count} 个负值")
-            
+        actual_col = column_mapping.get(field, field)
+        if actual_col in df_mapped.columns:
             # 检查异常大值（假设大于100万为异常）
-            large_value_count = (df[field] > 1000000).sum()
+            large_value_count = (df_mapped[actual_col] > 1000000).sum()
             if large_value_count > 0:
-                warnings.append(f"字段 '{field}' 有 {large_value_count} 个异常大值")
+                warnings.append(f"字段 '{actual_col}' 有 {large_value_count} 个异常大值")
     
     # 检查日期字段的有效性
     date_fields = ['年', '月', '日']
     for field in date_fields:
-        if field in df.columns:
-            invalid_count = df[field].isnull().sum()
+        actual_col = column_mapping.get(field, field)
+        if actual_col in df_mapped.columns:
+            invalid_count = df_mapped[actual_col].isnull().sum()
             if invalid_count > 0:
-                warnings.append(f"字段 '{field}' 有 {invalid_count} 个无效值")
+                warnings.append(f"字段 '{actual_col}' 有 {invalid_count} 个无效值")
     
     return {
         "has_issues": len(issues) > 0,
         "has_warnings": len(warnings) > 0,
         "issues": issues,
         "warnings": warnings,
-        "total_records": len(df),
-        "valid_records": len(df) - len(issues)
+        "total_records": len(df_mapped),
+        "valid_records": len(df_mapped) - len(issues)
     }
 
 def get_recommended_strategy(file_info: Dict[str, Any], db_status: Dict[str, Any]) -> str:
@@ -192,3 +300,19 @@ def get_recommended_strategy(file_info: Dict[str, Any], db_status: Dict[str, Any
     
     # 默认推荐更新模式
     return "update"
+
+# 新增函数：标准化列名（去除空格）
+def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """标准化DataFrame的列名，去除空格"""
+    df_standardized = df.copy()
+    df_standardized.columns = [col.replace(' ', '') for col in df_standardized.columns]
+    return df_standardized
+
+# 新增函数：获取原始列名到标准列名的映射
+def get_column_mapping(headers: list) -> Dict[str, str]:
+    """获取原始列名到标准列名（去除空格）的映射"""
+    mapping = {}
+    for header in headers:
+        standard_header = header.replace(' ', '')
+        mapping[standard_header] = header
+    return mapping
