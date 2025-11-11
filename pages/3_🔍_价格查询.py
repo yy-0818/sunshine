@@ -246,7 +246,10 @@ def render_results(df):
     page_data = df.iloc[start_idx:end_idx]
 
     st.markdown(f"#### 📋 查询结果（共 {len(df):,} 条记录）")
-    st.dataframe(page_data, width='stretch')
+    st.dataframe(page_data, width='stretch', column_config={
+        '单价':st.column_config.NumberColumn(format="¥%.2f",width='small'),
+        '金额':st.column_config.NumberColumn(format="¥%.2f",width='small')
+    })
 
     render_pagination_controls(current_page, total_pages, len(df))
 
@@ -260,7 +263,10 @@ def render_results(df):
 def main():
     st.subheader("📋 最新价格数据")
     latest_df = get_latest_prices()
-    st.dataframe(latest_df, width='stretch')
+    st.dataframe(latest_df, width='stretch', column_config={
+        '单价':st.column_config.NumberColumn(format="¥%.2f",width='small'),
+        '金额':st.column_config.NumberColumn(format="¥%.2f",width='small')
+    })
 
     # 统计和导出 
     col1, col2 = st.columns([4, .75]) 
