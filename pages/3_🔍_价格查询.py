@@ -159,10 +159,10 @@ def render_filters():
     st.markdown("### 🎛️ 高级数据查询")
     st.caption("根据客户、产品、时间范围等条件筛选历史销售记录（展示所有数据）")
     # 维持折叠状态
-    # if "filter_expanded" not in st.session_state:
-    #     st.session_state.filter_expanded = True
+    if "filter_expanded" not in st.session_state:
+        st.session_state.filter_expanded = True
     
-    with st.expander("🎛️ 高级筛选条件", expanded=False):
+    with st.expander("🎛️ 高级筛选条件", expanded=st.session_state.filter_expanded):
         color_opts = get_unique_values("color")
         grade_opts = get_unique_values("grade")
         line_opts = get_unique_values("production_line")
