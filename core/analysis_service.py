@@ -180,6 +180,18 @@ class AnalysisService:
                     conn
                 )['c'][0]
 
+                # 最高价
+                stats['max_price'] = pd.read_sql_query(
+                    "SELECT MAX(unit_price) AS m FROM sales_records ",
+                    conn
+                )['m'][0]
+
+                # 最低价
+                stats['min_price'] = pd.read_sql_query(
+                    "SELECT MIN(unit_price) AS m FROM sales_records ",
+                    conn
+                )['m'][0]
+
                 # 销售汇总
                 sales_summary = pd.read_sql_query('''
                     SELECT 

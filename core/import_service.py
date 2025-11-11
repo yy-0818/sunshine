@@ -286,10 +286,10 @@ class ImportService:
             
             text_str = str(text).strip()
             
-            # 处理特殊情况：以"壹"结尾的
+            # 处理特殊情况：以"壹"、"负"结尾的
             if text_str.endswith('壹'):
                 text_str = text_str[:-1]
-            
+
             # 1. 直接匹配已知颜色
             color_match = self.color_pattern.search(text_str)
             if color_match:

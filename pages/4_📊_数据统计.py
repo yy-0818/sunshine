@@ -58,15 +58,17 @@ try:
         with col10:
             total_amount = stats.get('total_amount', 0)
             st.metric("总金额", f"¥{total_amount:,.2f}")
-        # with col11:
-        #     # 计算平均交易金额
-        #     avg_amount = total_amount / stats['total_records'] if stats['total_records'] > 0 else 0
-        #     st.metric("平均交易金额", f"¥{avg_amount:,.2f}")
-        # with col12:
-        #     # 计算客单价
-        #     avg_customer_amount = total_amount / stats['sub_customers'] if stats['sub_customers'] > 0 else 0
-        #     st.metric("客单价", f"¥{avg_customer_amount:,.2f}")
-        #     pass
+        with col11:
+            # 计算平均交易金额
+            avg_amount = total_amount / stats['total_records'] if stats['total_records'] > 0 else 0
+            st.metric("平均交易金额", f"¥{avg_amount:,.2f}")
+        with col12:
+            # 计算客单价
+            sub_customers = stats['sub_customers'].item()  # 或使用 .iloc[0]
+            avg_customer_amount = total_amount / sub_customers if sub_customers > 0 else 0
+            st.metric("客单价", f"¥{avg_customer_amount:,.2f}")
+
+
         
         # 金额分析
         st.markdown("---")
