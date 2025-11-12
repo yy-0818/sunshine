@@ -110,6 +110,7 @@ class ImportService:
             
             # 应用表头映射，确保列名一致性
             df = self._apply_header_mapping(df)
+            df = df.dropna(subset=['客户名称'], how='all')
         
         return df
     
