@@ -64,10 +64,10 @@ def get_product_price_trend(finance_id, product_name, color):
         ''', conn, params=[finance_id, product_name, color])
     return trend_data
 
-def get_product_transactions(finance_id, product_name, color):
-    """获取产品的完整销售数据列表"""
+def get_complete_sales_records(finance_id, product_name=None, color=None):
+    """获取完整的销售数据列表"""
     with get_connection() as conn:
-        transactions = pd.read_sql_query('''
+        query = '''
             SELECT 
                 customer_name,
                 finance_id,
@@ -85,9 +85,17 @@ def get_product_transactions(finance_id, product_name, color):
                 remark,
                 production_line
             FROM sales_records
-            WHERE finance_id = ? AND product_name = ? AND color = ?
-            ORDER BY record_date DESC, ticket_number
-        ''', conn, params=[finance_id, product_name, color])
+            WHERE finance_id = ?
+        '''
+        params = [finance_id]
+        
+        if product_name and color:
+            query += " AND product_name = ? AND color = ?"
+            params.extend([product_name, color])
+        
+        query += " ORDER BY record_date DESC"
+        
+        transactions = pd.read_sql_query(query, conn, params=params)
     return transactions
 
 # 客户选择
@@ -161,7 +169,7 @@ if selected_finance_id:
     display_data['首次购买'] = pd.to_datetime(display_data['首次购买']).dt.strftime('%Y-%m-%d')
     display_data['最近购买'] = pd.to_datetime(display_data['最近购买']).dt.strftime('%Y-%m-%d')
     
-    st.dataframe(display_data, use_container_width=True, height=500)
+    st.dataframe(display_data, width='stretch', height='auto')
     
     # 产品选择详细分析
     st.markdown("### 🔍 产品详细分析")
@@ -172,10 +180,13 @@ if selected_finance_id:
         option_text = f"{row['product_name']} - {row['color']} (¥{row['avg_price']:.2f})"
         product_options.append((option_text, row['product_name'], row['color']))
     
+    # 添加"全部产品"选项
+    product_options.insert(0, ("全部产品 - 查看所有订单", None, None))
+    
     selected_option = st.selectbox(
-        "选择产品查看完整销售数据",
+        "选择产品查看详细订单",
         [opt[0] for opt in product_options],
-        help="选择产品和颜色查看完整销售数据列表"
+        help="选择产品和颜色查看详细订单信息，或选择'全部产品'查看所有订单"
     )
     
     # 获取选中的产品
@@ -187,19 +198,70 @@ if selected_finance_id:
             selected_color = color
             break
     
-    if selected_product and selected_color:
+    # 获取完整的销售数据
+    with st.spinner("正在获取订单数据..."):
+        complete_records = get_complete_sales_records(selected_finance_id, selected_product, selected_color)
+    
+    if selected_option == "全部产品 - 查看所有订单":
         st.markdown("---")
-        st.subheader(f"📋 {selected_product} - {selected_color} 完整销售数据")
+        st.subheader(f"📋 {customer_name} - 所有订单记录")
         
-        # 获取完整销售数据
-        with st.spinner("正在获取销售数据..."):
-            transactions = get_product_transactions(selected_finance_id, selected_product, selected_color)
+        # 显示总体统计
+        total_records = len(complete_records)
+        st.metric("总订单数", f"{total_records}笔")
         
-        # 显示产品基本信息
+        if not complete_records.empty:
+            # 格式化完整销售数据
+            records_display = complete_records.copy()
+            records_display = records_display.rename(columns={
+                'customer_name': '客户名称',
+                'finance_id': '编号',
+                'sub_customer_name': '子客户名称',
+                'year': '年',
+                'month': '月',
+                'day': '日',
+                'product_name': '产品名称',
+                'color': '颜色',
+                'grade': '等级',
+                'quantity': '数量',
+                'unit_price': '单价',
+                'amount': '金额',
+                'ticket_number': '票号',
+                'remark': '备注',
+                'production_line': '生产线'
+            })
+            
+            st.dataframe(records_display, width='stretch', height='auto',column_config={
+                '单价':st.column_config.NumberColumn(format="¥%.2f",width='small'),
+                '金额':st.column_config.NumberColumn(format="¥%.2f",width='small')
+            })
+            
+            # 导出功能
+            st.markdown("### 📤 导出数据")
+            csv_data = records_display.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 导出所有订单记录",
+                csv_data,
+                f"所有订单记录_{customer_name}.csv",
+                "text/csv",
+                width='stretch'
+            )
+        else:
+            st.info("暂无订单记录")
+    
+    elif selected_product and selected_color:
+        st.markdown("---")
+        st.subheader(f"📋 {selected_product} - {selected_color} 订单详情")
+        
+        # 获取产品基本信息
         product_info = products_analysis[
             (products_analysis['product_name'] == selected_product) & 
             (products_analysis['color'] == selected_color)
         ].iloc[0]
+        
+        # 获取价格趋势数据（用于判断是否显示图表）
+        with st.spinner("正在获取价格趋势..."):
+            trend_data = get_product_price_trend(selected_finance_id, selected_product, selected_color)
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -212,7 +274,6 @@ if selected_finance_id:
             st.metric("交易次数", f"{product_info['transaction_count']}")
         
         # 只有当有足够数据时才显示趋势图
-        trend_data = get_product_price_trend(selected_finance_id, selected_product, selected_color)
         if not trend_data.empty and len(trend_data) >= 3:
             st.markdown("### 📈 价格趋势")
             
@@ -235,26 +296,23 @@ if selected_finance_id:
                 title='价格趋势',
                 xaxis_title='月份',
                 yaxis_title='价格 (元)',
-                height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("📊 数据点不足，无法显示价格趋势图")
         
-        # 完整销售数据列表
-        st.markdown("### 📝 完整销售数据列表")
+        # 详细交易记录 - 总是显示
+        st.markdown("### 📝 详细订单记录")
         
-        if not transactions.empty:
+        if not complete_records.empty:
             # 格式化完整销售数据
-            transactions_display = transactions.copy()
-            
-            # 重命名列以符合要求
-            transactions_display = transactions_display.rename(columns={
+            records_display = complete_records.copy()
+            records_display = records_display.rename(columns={
                 'customer_name': '客户名称',
                 'finance_id': '编号',
                 'sub_customer_name': '子客户名称',
                 'year': '年',
-                'month': '月', 
+                'month': '月',
                 'day': '日',
                 'product_name': '产品名称',
                 'color': '颜色',
@@ -267,68 +325,40 @@ if selected_finance_id:
                 'production_line': '生产线'
             })
             
-            # 处理空值
-            transactions_display['子客户名称'] = transactions_display['子客户名称'].fillna('-')
-            transactions_display['等级'] = transactions_display['等级'].fillna('-')
-            transactions_display['备注'] = transactions_display['备注'].fillna('-')
-            transactions_display['生产线'] = transactions_display['生产线'].fillna('-')
-            
-            # 格式化数值
-            transactions_display['单价'] = transactions_display['单价'].round(2)
-            transactions_display['金额'] = transactions_display['金额'].round(2)
-            
-            # 添加余额列（如果需要计算，这里暂时设为0）
-            transactions_display['余额'] = 0
-            
-            # 重新排列列的顺序
-            column_order = [
-                '客户名称', '编号', '子客户名称', '年', '月', '日', 
-                '产品名称', '颜色', '等级', '数量', '单价', '金额', 
-                '余额', '票号', '备注', '生产线'
-            ]
-            
-            # 确保所有列都存在
-            for col in column_order:
-                if col not in transactions_display.columns:
-                    transactions_display[col] = '-'
-            
-            transactions_display = transactions_display[column_order]
-            
-            # 显示完整数据表格
-            st.dataframe(transactions_display, use_container_width=True, height=600)
+            st.dataframe(records_display, width='stretch', height='auto',column_config={
+                '单价':st.column_config.NumberColumn(format="¥%.2f",width='small'),
+                '金额':st.column_config.NumberColumn(format="¥%.2f",width='small')
+            })
             
             # 导出功能
             st.markdown("### 📤 导出数据")
-            csv_transactions = transactions_display.to_csv(index=False).encode('utf-8')
+            csv_data = records_display.to_csv(index=False).encode('utf-8')
             st.download_button(
-                "📥 导出完整销售数据",
-                csv_transactions,
-                f"销售数据_{customer_name}_{selected_product}_{selected_color}.csv",
+                "📥 导出订单记录",
+                csv_data,
+                f"订单记录_{customer_name}_{selected_product}_{selected_color}.csv",
                 "text/csv",
                 use_container_width=True
             )
         else:
-            st.info("暂无销售数据记录")
+            st.info("暂无订单记录")
 
 # 使用说明
 with st.expander("💡 使用说明", expanded=False):
     st.markdown("""
     **功能说明**
     - 选择客户后，展示该客户购买的所有产品汇总
-    - 从产品列表中选择具体产品查看完整销售数据
+    - 可选择"全部产品"查看客户所有订单记录
+    - 选择具体产品查看该产品的详细订单信息
     
     **数据展示**
     - **产品汇总**: 显示客户购买的所有产品、销量、销售额等
-    - **完整销售数据**: 展示选定产品的所有销售记录，包含：
-      - 客户名称、编号、子客户名称
-      - 年、月、日
-      - 产品名称、颜色、等级
-      - 数量、单价、金额
-      - 票号、备注、生产线
+    - **完整订单记录**: 包含客户名称、编号、子客户、年月日、产品名称、颜色、等级、数量、单价、金额、票号、备注、生产线等完整信息
+    - **价格趋势**: 仅当有足够数据时显示价格变化趋势
     
     **使用技巧**
     - 通过产品汇总表了解客户的产品购买情况
-    - 选择感兴趣的产品查看完整销售数据
-    - 当数据量足够时自动显示价格趋势图
-    - 导出完整销售数据用于进一步分析
+    - 选择"全部产品"查看客户所有订单记录
+    - 选择具体产品查看该产品的详细信息和价格趋势
+    - 导出数据用于进一步分析
     """)
