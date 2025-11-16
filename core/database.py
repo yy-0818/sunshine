@@ -175,12 +175,28 @@ def get_database_status():
             db_size = 0
         status['db_size_mb'] = round(db_size, 2)
 
-        # 子客户数（唯一 sub_customer_name 不为空的计数）
-        cursor.execute("SELECT COUNT(DISTINCT sub_customer_name) FROM customers WHERE sub_customer_name IS NOT NULL")
+        # 子客户数（唯一 customer_name, finance_id, sub_customer_name）
+        cursor.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                FROM customers
+                WHERE customer_name IS NOT NULL 
+                    AND finance_id IS NOT NULL 
+                    AND sub_customer_name IS NOT NULL
+            ) AS unique_customers
+        """)
         status['sub_customers'] = cursor.fetchone()[0]
 
-        # 主客户数（唯一 customer_name）
-        cursor.execute("SELECT COUNT(DISTINCT customer_name) FROM customers")
+
+        # 主客户数（唯一 customer_name,finance_id）
+        cursor.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT customer_name, finance_id
+                FROM customers
+                WHERE customer_name IS NOT NULL
+                    AND finance_id IS NOT NULL
+            ) AS unique_customers
+        """)
         status['main_customers'] = cursor.fetchone()[0]
 
         # 产品颜色数

@@ -188,7 +188,7 @@ class AnalysisService:
 
                 # 最低价
                 stats['min_price'] = pd.read_sql_query(
-                    "SELECT MIN(unit_price) AS m FROM sales_records ",
+                    "SELECT MIN(unit_price) AS m FROM sales_records WHERE unit_price > 0",
                     conn
                 )['m'][0]
 
