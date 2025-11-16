@@ -40,7 +40,7 @@ def get_connection():
         conn.close()
 
 def init_database():
-    """初始化数据库 - 性能优化版本"""
+    """初始化数据库"""
     with get_connection() as conn:
         cursor = conn.cursor()
         
@@ -106,8 +106,14 @@ def init_database():
             '''
         ]
         
-        for script in table_scripts:
-            cursor.execute(script)
+        # for script in table_scripts:
+        #     cursor.execute(script)
+        for i, script in enumerate(table_scripts):
+            try:
+                cursor.execute(script)
+                logger.info(f"成功创建表 {i+1}")
+            except Exception as e:
+                logger.error(f"创建表 {i+1} 时出错: {e}")
         
         # 批量创建索引
         index_scripts = [
@@ -120,12 +126,18 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_sales_date_composite ON sales_records(year, month, day)',
             'CREATE INDEX IF NOT EXISTS idx_customer_finance ON customers(finance_id)'
             # 新增生产线相关索引
-            'CREATE INDEX IF NOT EXISTS idx_production_line ON sales_records(production_line)',
-            'CREATE INDEX IF NOT EXISTS idx_production_line_date ON sales_records(production_line, record_date)'
+            'CREATE INDEX IF NOT EXISTS idx_production_line ON sales_records(production_line);',
+            'CREATE INDEX IF NOT EXISTS idx_production_line_date ON sales_records(production_line, record_date);'
         ]
         
-        for script in index_scripts:
-            cursor.execute(script)
+        # for script in index_scripts:
+        #     cursor.execute(script)
+        for i, script in enumerate(index_scripts):
+            try:
+                cursor.execute(script)
+                logger.info(f"成功创建索引 {i+1}")
+            except Exception as e:
+                logger.error(f"创建索引 {i+1} 时出错: {e}")
         
         # 优化表结构检查
         _check_and_alter_tables(cursor)
