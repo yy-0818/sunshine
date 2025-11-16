@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from core.analysis_service import AnalysisService
 from core.database import get_connection
+from core.production_line_service import ProductionLineService
 
 st.logo(
     image='./assets/logo.png',
@@ -14,11 +15,441 @@ st.set_page_config(page_title="数据统计", layout="wide")
 st.title("📊 数据统计分析")
 
 analysis_service = AnalysisService()
+production_line_service = ProductionLineService()
+
+# 获取生产线分类统计
+@st.cache_data(ttl=300)  # 缓存5分钟
+def get_production_line_stats():
+    return production_line_service.get_production_line_statistics()
+
+# 显示数据分类统计信息
+st.subheader("🏭 生产线数据分类概览")
+
+try:
+    pl_stats = get_production_line_stats()
+    
+    if pl_stats['total_records'] == 0:
+        st.warning("暂无生产线数据，请先导入数据")
+    else:
+        # 分类统计卡片
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.metric("总记录数", pl_stats['total_records'])
+        
+        with col2:
+            st.metric("已分类记录", 
+                     f"{pl_stats['classified_records']}",
+                     delta=f"{pl_stats.get('classified_percentage', 0):.1f}%")
+        
+        with col3:
+            st.metric("未分类记录", 
+                     f"{pl_stats['unclassified_records']}",
+                     delta=f"{pl_stats.get('unclassified_percentage', 0):.1f}%",
+                     delta_color="inverse")
+        
+        with col4:
+            phase1_count = pl_stats['phase_breakdown'].get('一期', 0)
+            phase1_percent = (phase1_count / pl_stats['total_records'] * 100) if pl_stats['total_records'] > 0 else 0
+            st.metric("一期记录", f"{phase1_count}", delta=f"{phase1_percent:.1f}%")
+        
+        with col5:
+            phase2_count = pl_stats['phase_breakdown'].get('二期', 0)
+            phase2_percent = (phase2_count / pl_stats['total_records'] * 100) if pl_stats['total_records'] > 0 else 0
+            st.metric("二期记录", f"{phase2_count}", delta=f"{phase2_percent:.1f}%")
+        
+        # 分类比例图表
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 分类比例饼图
+            classification_data = {
+                '分类': ['已分类', '未分类'],
+                '记录数': [pl_stats['classified_records'], pl_stats['unclassified_records']]
+            }
+            df_classification = pd.DataFrame(classification_data)
+            
+            if pl_stats['classified_records'] > 0 or pl_stats['unclassified_records'] > 0:
+                fig_classification = px.pie(
+                    df_classification, 
+                    values='记录数', 
+                    names='分类',
+                    title="数据分类比例",
+                    color='分类',
+                    color_discrete_map={'已分类': '#00CC96', '未分类': '#EF553B'}
+                )
+                fig_classification.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label',
+                    hovertemplate='<b>%{label}</b><br>记录数: %{value}<br>占比: %{percent}'
+                )
+                fig_classification.update_layout(
+                    template="plotly_white",
+                    showlegend=False
+                )
+                st.plotly_chart(fig_classification, width='stretch')
+        
+        with col2:
+            # 阶段分布饼图
+            phase_data = []
+            for phase, count in pl_stats['phase_breakdown'].items():
+                if count > 0:
+                    phase_data.append({'阶段': phase, '记录数': count})
+            
+            if phase_data:
+                df_phase = pd.DataFrame(phase_data)
+                fig_phase = px.pie(
+                    df_phase, 
+                    values='记录数', 
+                    names='阶段',
+                    title="阶段分布比例",
+                    color='阶段',
+                    color_discrete_map={'一期': '#636EFA', '二期': '#FFA15A'}
+                )
+                fig_phase.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label',
+                    hovertemplate='<b>%{label}</b><br>记录数: %{value}<br>占比: %{percent}'
+                )
+                fig_phase.update_layout(
+                    template="plotly_white",
+                    showlegend=False
+                )
+                st.plotly_chart(fig_phase, width='stretch')
+            else:
+                st.info("暂无阶段分布数据")
+        
+        # 显示未分类数据示例
+        if pl_stats['unclassified_examples']:
+            with st.expander("⚠️ 查看未分类生产线示例", expanded=False):
+                st.write("以下生产线未能自动分类，请检查数据或更新分类规则：")
+                unclassified_df = pd.DataFrame(pl_stats['unclassified_examples'])
+                st.dataframe(
+                    unclassified_df,
+                    column_config={
+                        'production_line': '生产线名称',
+                        'record_count': '记录数'
+                    },
+                    width='stretch',
+                    hide_index=True
+                )
+
+except Exception as e:
+    st.error(f"获取生产线统计信息失败: {str(e)}")
 
 tabs = st.tabs(["总数分析", "一期分析", "二期分析"]) 
-# 生产线分组
-first_phase_lines = {"一二线", "三线"}
-second_phase_lines = {"五线", "六线", "七线", "配件"}
+
+def create_phase_analysis_tab(phase):
+    """创建阶段分析选项卡内容"""
+    try:
+        # 获取阶段数据
+        phase_data = production_line_service.get_phase_data(phase)
+        phase_stats = production_line_service.get_phase_summary_stats(phase)
+        
+        if phase_data.empty:
+            st.warning(f"⚠️ {phase}暂无数据")
+            return
+        
+        # 阶段概览
+        st.subheader(f"📈 {phase}关键指标")
+        
+        # 第一行指标
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("总记录数", phase_stats['total_records'])
+        with col2:
+            st.metric("客户数量", phase_stats['customer_count'])
+        with col3:
+            st.metric("产品数量", phase_stats['product_count'])
+        with col4:
+            st.metric("颜色种类", phase_stats['color_count'])
+        
+        # 第二行指标
+        col5, col6, col7, col8 = st.columns(4)
+        with col5:
+            st.metric("总金额", f"¥{phase_stats['total_amount']:,.2f}")
+        with col6:
+            st.metric("总数量", f"{phase_stats['total_quantity']:,.0f}")
+        with col7:
+            st.metric("平均价格", f"¥{phase_stats['avg_price']:.2f}")
+        with col8:
+            if phase_stats['date_range']:
+                date_range = f"{phase_stats['date_range']['start']} 至 {phase_stats['date_range']['end']}"
+                st.metric("数据时间范围", date_range)
+        
+        # 生产线详细分析
+        st.markdown("---")
+        st.subheader("🏭 生产线详细分析")
+        
+        # 获取生产线详情
+        phase_details = get_production_line_stats()['production_line_details'].get(phase, [])
+        
+        if phase_details:
+            # 转换为DataFrame
+            lines_df = pd.DataFrame(phase_details)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # 生产线记录分布
+                fig_lines = px.bar(
+                    lines_df.nlargest(10, 'record_count'),
+                    x='production_line',
+                    y='record_count',
+                    title=f"{phase}生产线记录数TOP10",
+                    color='record_count',
+                    color_continuous_scale="Viridis"
+                )
+                fig_lines.update_layout(
+                    template="plotly_white",
+                    xaxis_title="生产线",
+                    yaxis_title="记录数",
+                    xaxis_tickangle=-45
+                )
+                st.plotly_chart(fig_lines, width='stretch')
+            
+            with col2:
+                # 生产线金额分布
+                fig_amount = px.pie(
+                    lines_df,
+                    values='total_amount',
+                    names='production_line',
+                    title=f"{phase}生产线销售额分布",
+                    hole=0.4
+                )
+                fig_amount.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label'
+                )
+                fig_amount.update_layout(
+                    template="plotly_white",
+                    showlegend=False
+                )
+                st.plotly_chart(fig_amount, width='stretch')
+            
+            # 生产线详细数据表
+            st.subheader("📋 生产线详细数据")
+            display_lines = lines_df.copy()
+            display_lines['平均价格'] = display_lines['avg_price'].round(2)
+            display_lines['总金额'] = display_lines['total_amount'].round(2)
+            display_lines['总数量'] = display_lines['total_quantity'].round(0)
+            
+            st.dataframe(
+                display_lines[['production_line', 'record_count', '总数量', '平均价格', '总金额']],
+                column_config={
+                    'production_line': '生产线',
+                    'record_count': '记录数',
+                    '总数量': st.column_config.NumberColumn(format="%d"),
+                    '平均价格': st.column_config.NumberColumn(format="¥%.2f"),
+                    '总金额': st.column_config.NumberColumn(format="¥%.2f")
+                },
+                width='stretch',
+                hide_index=True
+            )
+        
+        # 时间趋势分析 - 使用SQL查询方式（参考总数分析）
+        st.markdown("---")
+        st.subheader("📅 时间趋势分析")
+        
+        # 获取当前阶段的生产线关键词
+        phase_keywords = production_line_service.phase_configs[phase]['keywords']
+        
+        # 构建SQL查询条件
+        conditions = " OR ".join([f"production_line LIKE '%{keyword}%'" for keyword in phase_keywords])
+        
+        with get_connection() as conn:
+            # 月度趋势
+            monthly_trend = pd.read_sql_query(f'''
+                SELECT 
+                    strftime('%Y-%m', record_date) as month,
+                    COUNT(*) as transaction_count,
+                    SUM(amount) as total_amount,
+                    AVG(unit_price) as avg_price,
+                    SUM(quantity) as total_quantity
+                FROM sales_records
+                WHERE ({conditions})
+                GROUP BY strftime('%Y-%m', record_date)
+                ORDER BY month
+            ''', conn)
+
+        if not monthly_trend.empty and len(monthly_trend) > 1:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # 月度销售额趋势
+                st.markdown("#### 📈 销售额、交易量、均价多维趋势")
+                fig_trend = go.Figure()
+
+                # 销售额趋势（主轴）
+                fig_trend.add_trace(go.Scatter(
+                    x=monthly_trend['month'],
+                    y=monthly_trend['total_amount'],
+                    name='销售额 (¥)',
+                    line=dict(color='#2563EB', width=3),
+                    line_shape='spline',
+                    marker=dict(size=6),
+                    fill='tozeroy',
+                    fillcolor='rgba(37,99,235,0.1)',
+                    hovertemplate='¥%{y:,.2f}'
+                ))
+
+                # 交易次数趋势（次轴）
+                fig_trend.add_trace(go.Bar(
+                    x=monthly_trend['month'],
+                    y=monthly_trend['transaction_count'],
+                    name='交易次数',
+                    marker_color='rgba(16,185,129,0.6)',
+                    yaxis='y2',
+                    hovertemplate='%{y:,}'
+                ))
+
+                # 图表布局
+                fig_trend.update_layout(
+                    title=f"📊 {phase}销售额 vs 交易量 时间对比趋势",
+                    template="plotly_white",
+                    xaxis=dict(title="月份"),
+                    yaxis=dict(title="销售额 (¥)", side='left', showgrid=False),
+                    yaxis2=dict(title="交易次数", overlaying='y', side='right', showgrid=False),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    hovermode=('x unified'),
+                )
+
+                st.plotly_chart(fig_trend, width='stretch')
+            
+            with col2:
+                # 月度交易量趋势
+                st.markdown("#### 💹 平均单价与销售数量趋势")
+                fig_price_qty = go.Figure()
+
+                fig_price_qty.add_trace(go.Scatter(
+                    x=monthly_trend['month'],
+                    y=monthly_trend['avg_price'],
+                    name='平均单价',
+                    line_shape='spline',
+                    line=dict(color='#F97316', width=3, dash='dot'),
+                    marker=dict(size=6, symbol='circle'),
+                    hovertemplate='¥%{y:,.2f}'
+                ))
+
+                fig_price_qty.add_trace(go.Bar(
+                    x=monthly_trend['month'],
+                    y=monthly_trend['total_quantity'],
+                    name='销售数量',
+                    marker_color='rgba(49,130,246,0.8)',
+                    yaxis='y2',
+                    hovertemplate='销售数量: %{y:,}<extra></extra>'
+                ))
+
+                fig_price_qty.update_layout(
+                    title=f"📦 {phase}平均单价 vs 销售数量 趋势变化",
+                    template="plotly_white",
+                    xaxis_title="月份",
+                    yaxis=dict(title="平均单价 (¥)"),
+                    yaxis2=dict(title="销售数量", overlaying='y', side='right', showgrid=False),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    hovermode=('x unified'),
+                )
+
+                st.plotly_chart(fig_price_qty, width='stretch')
+            
+            # 月度详细数据
+            st.markdown("#### 📈 月度详细数据")
+            display_monthly = monthly_trend.rename(columns={
+                'month': '月份',
+                'transaction_count': '交易次数',
+                'total_amount': '总金额',
+                'avg_price': '平均价格',
+                'total_quantity': '总数量'
+            })
+            see_data = st.expander('查看月度详细数据 👉')
+            with see_data:
+                st.dataframe(data=display_monthly.round(2).reset_index(drop=True))
+        else:
+            st.info(f"{phase}暂无足够的时间趋势数据")
+        
+        # 产品分析
+        st.markdown("---")
+        st.subheader("🏺 产品分析")
+        
+        if not phase_data.empty:
+            # 产品统计
+            product_stats = phase_data.groupby(['product_name', 'color']).agg({
+                'amount': 'sum',
+                'quantity': 'sum',
+                'unit_price': 'mean',
+                'id': 'count'
+            }).reset_index()
+            product_stats.columns = ['product_name', 'color', 'total_amount', 'total_quantity', 'avg_price', 'transaction_count']
+            product_stats = product_stats.sort_values('total_amount', ascending=False)
+            
+            if not product_stats.empty:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # 热销产品TOP10
+                    top_products = product_stats.head(10)
+                    fig_top_products = px.bar(
+                        top_products,
+                        x='product_name',
+                        y='total_amount',
+                        color='color',
+                        title=f"{phase}热销产品TOP10",
+                        labels={'product_name': '产品名称', 'total_amount': '销售额 (¥)'}
+                    )
+                    fig_top_products.update_layout(
+                        template="plotly_white",
+                        xaxis_tickangle=-45,
+                        showlegend=True
+                    )
+                    st.plotly_chart(fig_top_products, width='stretch')
+                
+                with col2:
+                    # 产品价格分布
+                    fig_price_dist = px.box(
+                        product_stats,
+                        x='product_name',
+                        y='avg_price',
+                        title=f"{phase}产品价格分布",
+                        points="all"
+                    )
+                    fig_price_dist.update_layout(
+                        template="plotly_white",
+                        xaxis_tickangle=-45,
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig_price_dist, width='stretch')
+        
+        # 数据导出
+        st.markdown("---")
+        st.subheader("💾 数据导出")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 导出阶段数据
+            csv_data = phase_data.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                f"📥 导出{phase}数据",
+                csv_data,
+                f"{phase}_data.csv",
+                "text/csv",
+                width='stretch'
+            )
+        
+        with col2:
+            # 导出产品统计
+            if not product_stats.empty:
+                csv_products = product_stats.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    f"📥 导出{phase}产品统计",
+                    csv_products,
+                    f"{phase}_products.csv",
+                    "text/csv",
+                    width='stretch'
+                )
+                
+    except Exception as e:
+        st.error(f"分析{phase}数据时出错: {str(e)}")
 
 # 总数分析
 with tabs[0]:
@@ -663,10 +1094,10 @@ with tabs[0]:
 
 # 一期分析（按生产线）
 with tabs[1]:
-    pass
+    create_phase_analysis_tab("一期")
 # 二期分析（按生产线）
 with tabs[2]:
-    pass
+    create_phase_analysis_tab("二期")
 
 # 使用说明
 with st.expander("📚 使用说明", expanded=False):

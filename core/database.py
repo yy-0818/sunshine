@@ -119,6 +119,9 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_sales_customer_product ON sales_records(finance_id, sub_customer_name, color, grade, record_date)',
             'CREATE INDEX IF NOT EXISTS idx_sales_date_composite ON sales_records(year, month, day)',
             'CREATE INDEX IF NOT EXISTS idx_customer_finance ON customers(finance_id)'
+            # 新增生产线相关索引
+            'CREATE INDEX IF NOT EXISTS idx_production_line ON sales_records(production_line)',
+            'CREATE INDEX IF NOT EXISTS idx_production_line_date ON sales_records(production_line, record_date)'
         ]
         
         for script in index_scripts:
