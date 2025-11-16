@@ -125,6 +125,8 @@ with tabs[0]:
                             COUNT(*) as transaction_count
                         FROM sales_records
                         WHERE amount > 0
+                            AND color IS NOT NULL
+                            AND color != ''
                         GROUP BY color
                         ORDER BY total_amount DESC
                         LIMIT 10
@@ -389,19 +391,24 @@ with tabs[0]:
             with get_connection() as conn:
                 # 产品统计
                 product_stats = pd.read_sql_query('''
-                    SELECT 
-                        color,
-                        COALESCE(grade, '无等级') as grade,
-                        COUNT(*) as transaction_count,
-                        AVG(unit_price) as avg_price,
-                        SUM(quantity) as total_quantity,
-                        SUM(amount) as total_amount
-                    FROM sales_records 
-                    GROUP BY color, grade
-                    HAVING total_amount > 0
-                    ORDER BY total_amount DESC
-                ''', conn)
-            
+                                    SELECT 
+                                        CONCAT(product_name, ' - ', color) as product_info,
+                                        product_name,
+                                        color,
+                                        CASE 
+                                            WHEN grade IS NULL OR grade = '' THEN '无等级'
+                                            ELSE grade 
+                                        END as grade,
+                                        COUNT(*) as transaction_count,
+                                        AVG(unit_price) as avg_price,
+                                        SUM(quantity) as total_quantity,
+                                        SUM(amount) as total_amount
+                                    FROM sales_records 
+                                    GROUP BY product_name, color, grade
+                                    HAVING total_amount > 0
+                                    ORDER BY total_amount DESC
+                                ''', conn)
+
             if not product_stats.empty:
                 col1, col2 = st.columns(2)
                 
@@ -409,12 +416,12 @@ with tabs[0]:
                     top_products = product_stats.nlargest(10, 'total_amount')
                     fig_top_products = px.bar(
                         top_products, 
-                        x='color', 
+                        x='product_info',  # 使用组合后的产品信息
                         y='total_amount',
                         color='grade', 
                         title='🔥 热销产品TOP10 (按销售额)',
                         labels={
-                            'color': '产品颜色',
+                            'product_info': '产品名称 - 颜色',
                             'total_amount': '销售额（￥）',
                             'grade': '产品等级'
                         },
@@ -422,7 +429,7 @@ with tabs[0]:
                     fig_top_products.update_layout(
                         template="plotly_white",
                         xaxis_tickangle=-45,
-                        xaxis_title='产品颜色',
+                        xaxis_title='产品名称 - 颜色',
                         yaxis_title='销售额（￥）',
                         showlegend=True,
                         legend=dict(
@@ -434,24 +441,24 @@ with tabs[0]:
                         ),
                         margin=dict(l=50, r=50, t=50, b=100),
                     )
-                    # fig_top_products.update_traces(
-                    #     hovertemplate='<b>%{x}</b><br>销售额：¥%{y:,.2f}<br>等级：%{fullData.name}<extra></extra>'
-                    # )
+
                     st.plotly_chart(fig_top_products, width="stretch")
                 
                 with col2:
                     # 产品价格分布
                     fig_product_price = px.box(
                         product_stats, 
-                        x='color', 
+                        x='product_info',  # 使用组合后的产品信息
                         y='avg_price',
-                        title='📊 各产品颜色价格分布',
+                        color='grade',  # 添加颜色区分等级
+                        title='📊 各产品价格分布',
                         labels={
-                            'color': '产品颜色',
-                            'avg_price': '平均价格（元）'
+                            'product_info': '产品名称 - 颜色',
+                            'avg_price': '平均价格（元）',
+                            'grade': '产品等级'
                         }
                     )
-
+                    
                     # 完全重写悬停信息
                     fig_product_price.update_traces(
                         hoverinfo='none',  # 禁用默认悬停信息
@@ -461,13 +468,15 @@ with tabs[0]:
                     # 添加自定义悬停文本
                     fig_product_price.add_trace(
                         go.Scatter(
-                            x=product_stats['color'],
+                            x=product_stats['product_info'],
                             y=product_stats['avg_price'],
                             mode='markers',
                             marker=dict(
                                 opacity=0,
                                 size=0
                             ),
+                            name='',
+                            showlegend=False,
                             hovertemplate='<b>%{x}</b><br>平均价格：¥%{y:,.2f}<extra></extra>'
                         )
                     )
@@ -475,9 +484,16 @@ with tabs[0]:
                     fig_product_price.update_layout(
                         template="plotly_white",
                         xaxis_tickangle=-45,
-                        xaxis_title='产品颜色',
+                        xaxis_title='产品名称 - 颜色',
                         yaxis_title='平均价格（元）',
-                        showlegend=False,
+                        showlegend=True,
+                        legend=dict(
+                            title="产品等级",
+                            yanchor="top",
+                            y=0.99,
+                            xanchor="right",
+                            x=0.99
+                        ),
                         margin=dict(l=50, r=50, t=50, b=100),
                         plot_bgcolor='rgba(0,0,0,0)'
                     )

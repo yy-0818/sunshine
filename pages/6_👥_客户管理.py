@@ -29,7 +29,6 @@ def load_customer_data():
         ''', conn)
         
         # 处理空值
-        df['子客户名称'] = df['子客户名称'].fillna('')
         df['区域'] = df['区域'].fillna('')
         df['联系人'] = df['联系人'].fillna('')
         df['电话'] = df['电话'].fillna('')
