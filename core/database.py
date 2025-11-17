@@ -105,9 +105,7 @@ def init_database():
             )
             '''
         ]
-        
-        # for script in table_scripts:
-        #     cursor.execute(script)
+
         for i, script in enumerate(table_scripts):
             try:
                 cursor.execute(script)
@@ -124,14 +122,12 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_customer_hierarchy ON customers(customer_name, finance_id, sub_customer_name)',
             'CREATE INDEX IF NOT EXISTS idx_sales_customer_product ON sales_records(finance_id, sub_customer_name, color, grade, record_date)',
             'CREATE INDEX IF NOT EXISTS idx_sales_date_composite ON sales_records(year, month, day)',
-            'CREATE INDEX IF NOT EXISTS idx_customer_finance ON customers(finance_id)'
+            'CREATE INDEX IF NOT EXISTS idx_customer_finance ON customers(finance_id)',
             # 新增生产线相关索引
             'CREATE INDEX IF NOT EXISTS idx_production_line ON sales_records(production_line);',
             'CREATE INDEX IF NOT EXISTS idx_production_line_date ON sales_records(production_line, record_date);'
         ]
         
-        # for script in index_scripts:
-        #     cursor.execute(script)
         for i, script in enumerate(index_scripts):
             try:
                 cursor.execute(script)
@@ -164,8 +160,11 @@ def _check_and_alter_tables(cursor):
             else:
                 logger.warning(f"列 {table}.{column} 添加失败: {e}")
 
-def get_database_status():
-    """获取数据库状态，统一统计关键指标"""
+def get_database_status(days_threshold=30):
+    """获取数据库状态，统一统计关键指标
+    Args:
+        days_threshold: 活跃客户的时间阈值（天），默认30天内有过交易的客户为活跃客户
+    """
     status = {}
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -175,15 +174,15 @@ def get_database_status():
         status['sales_records_count'] = cursor.fetchone()[0]
 
         # 总销售金额
-        cursor.execute("SELECT SUM(unit_price) FROM sales_records")
-        status['total_sales'] = cursor.fetchone()[0]
+        cursor.execute("SELECT SUM(amount) FROM sales_records")
+        total_sales = cursor.fetchone()[0]
+        status['total_sales'] = total_sales if total_sales else 0
 
         # 价格变更记录数量
         cursor.execute("SELECT COUNT(*) FROM price_change_history")
         status['price_change_history_count'] = cursor.fetchone()[0]
 
         # 数据库大小
-        import os
         try:
             db_size = os.path.getsize("ceramic_prices.db") / 1024 / 1024
         except:
@@ -201,7 +200,6 @@ def get_database_status():
             ) AS unique_customers
         """)
         status['sub_customers'] = cursor.fetchone()[0]
-
 
         # 主客户数（唯一 customer_name,finance_id）
         cursor.execute("""
@@ -221,6 +219,57 @@ def get_database_status():
         # 产品数
         cursor.execute("SELECT COUNT(DISTINCT product_name) FROM sales_records")
         status['unique_products'] = cursor.fetchone()[0]
+
+        # ================== 基于子客户的活跃客户统计 ==================
+        
+        # 最近N天内的活跃子客户数 - 使用子查询方式
+        cursor.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                FROM sales_records 
+                WHERE record_date >= date('now', ?)
+            )
+        """, (f'-{days_threshold} days',))
+        status['active_sub_customers_recent'] = cursor.fetchone()[0]
+
+        # 本月活跃子客户数
+        cursor.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                FROM sales_records 
+                WHERE strftime('%Y-%m', record_date) = strftime('%Y-%m', 'now')
+            )
+        """)
+        status['active_sub_customers_this_month'] = cursor.fetchone()[0]
+
+        # 上月活跃子客户数
+        cursor.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                FROM sales_records 
+                WHERE strftime('%Y-%m', record_date) = strftime('%Y-%m', 'now', '-1 month')
+            )
+        """)
+        status['active_sub_customers_last_month'] = cursor.fetchone()[0]
+
+        # 年度活跃子客户数
+        cursor.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                FROM sales_records 
+                WHERE strftime('%Y', record_date) = strftime('%Y', 'now')
+            )
+        """)
+        status['active_sub_customers_this_year'] = cursor.fetchone()[0]
+
+        # 计算活跃率
+        total_sub_customers = status['sub_customers']
+        if total_sub_customers > 0:
+            status['active_sub_customers_rate_recent'] = round(status['active_sub_customers_recent'] / total_sub_customers * 100, 2)
+            status['active_sub_customers_rate_this_month'] = round(status['active_sub_customers_this_month'] / total_sub_customers * 100, 2)
+        else:
+            status['active_sub_customers_rate_recent'] = 0
+            status['active_sub_customers_rate_this_month'] = 0
 
     return status
 

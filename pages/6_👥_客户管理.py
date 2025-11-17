@@ -85,7 +85,7 @@ def add_new_customer(customer_data):
 
 # 加载数据
 customers_df = load_customer_data()
-status = get_database_status()
+status = get_database_status(days_threshold=180)
 
 # 新增客户对话框
 @st.dialog("新增客户信息",width="medium")
@@ -191,18 +191,14 @@ else:
         col1.metric("总客户数", status["sub_customers"])
     
     with col2:
-        active_mask = customers_df['是否活跃'].apply(
-            lambda x: str(x).lower() == 'true' if isinstance(x, str) else bool(x)
-        )
-        active_count = active_mask.sum()
-        st.metric("活跃客户", active_count)
-        # col2.metric("活跃客户", status["active_customers"])
+        col2.metric("半年活跃客户", status["active_sub_customers_recent"],status["active_sub_customers_recent"]-status["active_sub_customers_this_year"])
+
     
     with col3:
-        st.metric("主客户数", status["main_customers"])
+        col3.metric("主客户数", status["main_customers"])
     
     with col4:
-        st.metric("子客户数", status["sub_customers"])
+        col4.metric("子客户数", status["sub_customers"])
 
     # 客户查询
     st.subheader("🔍 客户查询")
@@ -267,9 +263,9 @@ else:
         edited_df = st.data_editor(
             display_df,
             column_config={
-                "id": st.column_config.NumberColumn("ID", disabled=True,width=1),
+                "id": st.column_config.NumberColumn("ID", disabled=True),
                 "客户名称": st.column_config.TextColumn("客户名称", disabled=True),
-                "财务编号": st.column_config.TextColumn("财务编号", disabled=True,width=1),
+                "财务编号": st.column_config.TextColumn("财务编号", disabled=True),
                 "子客户名称": st.column_config.TextColumn("子客户类型", disabled=True),
                 "区域": st.column_config.TextColumn("区域"),
                 "联系人": st.column_config.TextColumn("联系人"),
