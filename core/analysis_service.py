@@ -139,19 +139,32 @@ class AnalysisService:
         stats = {}
         with get_connection() as conn:
             try:
-                # 唯一主客户  || '-' || finance_id
+                # 唯一主客户 customer_name,finance_id
                 main_customers = pd.read_sql_query('''
-                    SELECT COUNT(DISTINCT customer_name) AS count
-                    FROM customers
-                    -- WHERE sub_customer_name IS NULL OR sub_customer_name = ''
+                    SELECT COUNT(*) AS count
+                    FROM (
+                        SELECT DISTINCT customer_name, finance_id
+                        FROM customers
+                        WHERE customer_name IS NOT NULL
+                            AND finance_id IS NOT NULL
+                    ) AS unique_customers
                 ''', conn)
                 stats['main_customers'] = main_customers.iloc[0]['count'] if not main_customers.empty else 0
 
+
                 # 总客户数（所有子客户数合）
                 sub_customers = pd.read_sql_query('''
-                    SELECT COUNT(DISTINCT sub_customer_name) FROM customers WHERE sub_customer_name IS NOT NULL
+                    SELECT COUNT(*) AS count
+                    FROM (
+                        SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                        FROM customers
+                        WHERE customer_name IS NOT NULL
+                            AND finance_id IS NOT NULL
+                            AND sub_customer_name IS NOT NULL
+                    ) AS unique_customers
                 ''', conn)
-                stats['sub_customers'] = sub_customers.iloc[0]
+                stats['sub_customers'] = sub_customers.iloc[0]['count'] if not sub_customers.empty else 0
+
 
                 # 活跃客户数
                 active_customers = pd.read_sql_query('SELECT COUNT(*) AS count FROM customers WHERE is_active = 1', conn)
@@ -161,7 +174,7 @@ class AnalysisService:
                 unique_colors = pd.read_sql_query('''
                     SELECT COUNT(DISTINCT color) AS count
                     FROM sales_records
-                    -- WHERE color IS NOT NULL AND color != ''
+                     WHERE color IS NOT NULL AND color != ''
                 ''', conn)
                 stats['unique_colors'] = unique_colors.iloc[0]['count'] if not unique_colors.empty else 0
 
