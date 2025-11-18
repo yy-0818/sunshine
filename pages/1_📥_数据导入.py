@@ -77,7 +77,7 @@ def show_example_format():
         }
         
         example_df = pd.DataFrame(example_data)
-        st.dataframe(example_df, use_container_width=True)
+        st.dataframe(example_df, width='stretch')
         
         # 添加格式要求说明
         st.markdown("""
@@ -191,7 +191,7 @@ def main():
         ok, preview = preview_excel_data(temp_path, 5)
         if ok:
             st.success(f"成功读取数据，共 {len(preview)} 行记录")
-            st.dataframe(preview, use_container_width=True)
+            st.dataframe(preview, width='stretch')
             
             # 显示数据统计
             cols = st.columns(3)
