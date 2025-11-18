@@ -19,7 +19,7 @@ st.title("📊 数据统计分析")
 analysis_service = AnalysisService()
 production_line_service = ProductionLineService()
 
-# ==================== 通用组件函数 ====================
+# ==================== 通用组件函数优化 ====================
 
 def create_metric_card(label, value, delta=None, delta_color="normal"):
     """创建统一的指标卡片"""
@@ -42,7 +42,7 @@ def create_pie_chart(df, values_col, names_col, title, color_map=None):
     fig.update_traces(
         textposition='inside',
         textinfo='percent+label',
-        hovertemplate=f'<b>%{{label}}</b><br>记录数: %{{value}}<br>占比: %{{percent}}'
+        hovertemplate='<b>%{label}</b><br>记录数: %{value}<br>占比: %{percent}'
     )
     fig.update_layout(
         template="plotly_white",
@@ -51,12 +51,11 @@ def create_pie_chart(df, values_col, names_col, title, color_map=None):
     return fig
 
 def create_bar_chart(df, x_col, y_col, title, color_col=None, color_scale="Viridis", x_label=None, y_label=None):
-    """创建柱状图 - 修复列名问题"""
+    """创建柱状图"""
     if df.empty:
         st.info("暂无数据")
         return None
     
-    # 使用实际列名创建图表
     fig = px.bar(
         df,
         x=x_col,
@@ -66,7 +65,6 @@ def create_bar_chart(df, x_col, y_col, title, color_col=None, color_scale="Virid
         color_continuous_scale=color_scale
     )
     
-    # 设置坐标轴标签
     x_label = x_label or x_col
     y_label = y_label or y_col
     
@@ -78,35 +76,49 @@ def create_bar_chart(df, x_col, y_col, title, color_col=None, color_scale="Virid
     )
     return fig
 
+def format_chinese_month(month_str):
+    """将YYYY-MM格式转换为中文月份格式"""
+    try:
+        year, month = month_str.split('-')
+        month_names = ['一月', '二月', '三月', '四月', '五月', '六月', 
+                      '七月', '八月', '九月', '十月', '十一月', '十二月']
+        return f"{year}年{month_names[int(month)-1]}"
+    except:
+        return month_str
+
 def create_trend_comparison_chart(monthly_data, primary_col, secondary_col, title, 
                                 primary_name="销售额", secondary_name="交易次数",
                                 primary_color='#2563EB', secondary_color='rgba(16,185,129,0.4)'):
-    """创建趋势对比图 - 使用不同颜色区分"""
+    """创建趋势对比图 - 优化中文月份显示"""
     if monthly_data.empty or len(monthly_data) <= 1:
         st.info("暂无足够的时间趋势数据")
         return None
         
+    # 转换月份为中文格式
+    monthly_data = monthly_data.copy()
+    monthly_data['month_chinese'] = monthly_data['month'].apply(format_chinese_month)
+    
     fig = go.Figure()
     
     # 主Y轴数据（折线图）
     fig.add_trace(go.Scatter(
-        x=monthly_data['month'],
+        x=monthly_data['month_chinese'],
         y=monthly_data[primary_col],
         name=primary_name,
         line=dict(color=primary_color, width=3),
         line_shape='spline',
         marker=dict(size=6),
-        hovertemplate=f'%{{y:,.2f}}'
+        hovertemplate=f'{primary_name}: %{{y:,.2f}}<extra></extra>'
     ))
     
     # 次Y轴数据（柱状图）
     fig.add_trace(go.Bar(
-        x=monthly_data['month'],
+        x=monthly_data['month_chinese'],
         y=monthly_data[secondary_col],
         name=secondary_name,
         marker_color=secondary_color,
         yaxis='y2',
-        hovertemplate=f'%{{y:,}}'
+        hovertemplate=f'{secondary_name}: %{{y:,}}<extra></extra>'
     ))
     
     fig.update_layout(
@@ -121,15 +133,15 @@ def create_trend_comparison_chart(monthly_data, primary_col, secondary_col, titl
     )
     return fig
 
-# ==================== 生产线概览 ====================
+# ==================== 生产线概览优化 ====================
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_cached_production_line_stats():
     """缓存生产线统计数据"""
     return production_line_service.get_production_line_statistics()
 
 def render_production_line_overview():
-    """渲染生产线概览"""
+    """渲染生产线概览 - 优化布局"""
     st.subheader("🏭 生产线数据分类概览")
     
     try:
@@ -139,16 +151,14 @@ def render_production_line_overview():
             st.warning("暂无生产线数据，请先导入数据")
             return
         
-        # 统计指标卡片
+        # 优化指标卡片布局
         cols = st.columns(5)
         metrics_config = [
             ("总记录数", pl_stats['total_records'], None),
             ("已分类记录", pl_stats['classified_records'], f"{pl_stats.get('classified_percentage', 0):.1f}%"),
             ("未分类记录", pl_stats['unclassified_records'], f"{pl_stats.get('unclassified_percentage', 0):.1f}%", "inverse"),
-            ("一期记录", pl_stats['phase_breakdown'].get('一期', 0), 
-             f"{(pl_stats['phase_breakdown'].get('一期', 0) / pl_stats['total_records'] * 100):.1f}%"),
-            ("二期记录", pl_stats['phase_breakdown'].get('二期', 0), 
-             f"{(pl_stats['phase_breakdown'].get('二期', 0) / pl_stats['total_records'] * 100):.1f}%")
+            ("一期记录", pl_stats['phase_breakdown'].get('一期', 0), None),
+            ("二期记录", pl_stats['phase_breakdown'].get('二期', 0), None)
         ]
         
         for col, (label, value, delta, *delta_color) in zip(cols, metrics_config):
@@ -202,45 +212,56 @@ def render_production_line_overview():
     except Exception as e:
         st.error(f"获取生产线统计信息失败: {str(e)}")
 
-# ==================== 阶段分析 ====================
+# ==================== 阶段分析优化 ====================
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_cached_phase_data(phase):
     """缓存阶段数据"""
     return production_line_service.get_phase_data(phase)
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_cached_phase_stats(phase):
     """缓存阶段统计数据"""
     return production_line_service.get_phase_summary_stats(phase)
 
 def render_phase_metrics(phase_stats, phase):
-    """渲染阶段指标"""
+    """渲染阶段指标 - 优化布局"""
+    # 优化指标卡片布局
     cols1 = st.columns(4)
     metrics1 = [
-        ("总记录数", phase_stats['total_records']),
-        ("客户数量", phase_stats['customer_count']),
-        ("产品数量", phase_stats['product_count']),
-        ("颜色种类", phase_stats['color_count'])
+        ("总记录数", f"{phase_stats['total_records']:,}"),
+        ("客户数量", f"{phase_stats['customer_count']:,}"),
+        ("产品数量", f"{phase_stats['product_count']:,}"),
+        ("颜色种类", f"{phase_stats['color_count']:,}")
     ]
     
     for col, (label, value) in zip(cols1, metrics1):
         with col:
-            create_metric_card(label, value)
+            st.metric(label, value)
     
     cols2 = st.columns(4)
+    
+    # 优化时间范围显示
+    date_range_text = "暂无数据"
+    if phase_stats['date_range']:
+        start_date = phase_stats['date_range']['start'][:10] if phase_stats['date_range']['start'] else "未知"
+        end_date = phase_stats['date_range']['end'][:10] if phase_stats['date_range']['end'] else "未知"
+        date_range_text = f"{start_date} 至 {end_date}"
+    
     metrics2 = [
         ("总金额", f"¥{phase_stats['total_amount']:,.2f}"),
         ("总数量", f"{phase_stats['total_quantity']:,.0f}"),
         ("平均价格", f"¥{phase_stats['avg_price']:.2f}"),
-        ("数据时间范围", 
-         f"{phase_stats['date_range']['start']} 至 {phase_stats['date_range']['end']}" 
-         if phase_stats['date_range'] else "暂无数据")
+        ("数据时间范围", date_range_text)
     ]
     
     for col, (label, value) in zip(cols2, metrics2):
         with col:
-            st.metric(label, value)
+            if label == "数据时间范围":
+                # 对于长文本字段，使用更简洁的显示方式
+                st.metric(label, value)
+            else:
+                create_metric_card(label, value)
 
 def render_production_line_analysis(phase_details, phase):
     """渲染生产线分析"""
@@ -253,12 +274,14 @@ def render_production_line_analysis(phase_details, phase):
     col1, col2 = st.columns(2)
     
     with col1:
-        # 使用实际列名，但显示中文标签
         fig_lines = create_bar_chart(
             lines_df.nlargest(10, 'record_count'),
             'production_line', 'record_count',
             f"{phase}生产线记录数TOP10",
             x_label="生产线", y_label="记录数"
+        )
+        fig_lines.update_traces(
+            hovertemplate='<b>%{x}</b><br>记录数: %{y:,.2f}<extra></extra>'
         )
         if fig_lines:
             st.plotly_chart(fig_lines, width='stretch')
@@ -272,7 +295,11 @@ def render_production_line_analysis(phase_details, phase):
                 title=f"{phase}生产线销售额分布",
                 hole=0.4
             )
-            fig_amount.update_traces(textposition='inside', textinfo='percent+label')
+            fig_amount.update_traces(
+                textposition='inside', 
+                textinfo='percent+label',
+                hovertemplate='<b>%{label}</b><br>销售额: ¥%{value:,.2f}<br>占比: %{percent}<extra></extra>'
+            )
             fig_amount.update_layout(
                 template="plotly_white", 
                 showlegend=False, 
@@ -289,18 +316,18 @@ def render_production_line_analysis(phase_details, phase):
     st.dataframe(
         display_lines[['production_line', 'record_count', '总数量', '平均价格', '总金额']],
         column_config={
-            'production_line': '生产线',
-            'record_count': '记录数',
-            '总数量': st.column_config.NumberColumn(format="%d"),
-            '平均价格': st.column_config.NumberColumn(format="¥%.2f"),
-            '总金额': st.column_config.NumberColumn(format="¥%.2f")
+            'production_line': st.column_config.TextColumn('生产线', width="medium"),
+            'record_count': st.column_config.NumberColumn('记录数', format="%d"),
+            '总数量': st.column_config.NumberColumn('总数量', format="%d"),
+            '平均价格': st.column_config.NumberColumn('平均价格', format="¥%.2f"),
+            '总金额': st.column_config.NumberColumn('总金额', format="¥%.2f")
         },
         width='stretch',
         hide_index=True
     )
 
 def render_phase_trend_analysis(phase):
-    """渲染阶段趋势分析 - 使用不同颜色"""
+    """渲染阶段趋势分析 - 优化中文月份显示"""
     phase_keywords = production_line_service.phase_configs[phase]['keywords']
     conditions = " OR ".join([f"production_line LIKE '%{keyword}%'" for keyword in phase_keywords])
     
@@ -322,23 +349,21 @@ def render_phase_trend_analysis(phase):
         col1, col2 = st.columns(2)
         
         with col1:
-            # 使用蓝色和绿色区分
             fig_trend = create_trend_comparison_chart(
                 monthly_trend, 'total_amount', 'transaction_count',
                 f"📊 {phase}销售额 vs 交易量 时间对比趋势",
                 "销售额", "交易次数",
-                primary_color='#2563EB', secondary_color='#10B981'
+                primary_color="rgba(138, 92, 246, .85)", secondary_color='rgba(6, 214, 160, .7)'
             )
             if fig_trend:
                 st.plotly_chart(fig_trend, width='stretch')
         
         with col2:
-            # 使用橙色和蓝色区分
             fig_price_qty = create_trend_comparison_chart(
                 monthly_trend, 'avg_price', 'total_quantity',
                 f"📦 {phase}平均单价 vs 销售数量 趋势变化",
                 "平均单价", "销售数量",
-                primary_color='#F59E0B', secondary_color='#3B82F6'
+                primary_color='rgba(239, 71, 111, .85)', secondary_color='rgba(17, 138, 178, .7)'
             )
             if fig_price_qty:
                 st.plotly_chart(fig_price_qty, width='stretch')
@@ -346,7 +371,7 @@ def render_phase_trend_analysis(phase):
         # 月度详细数据
         with st.expander("📈 查看月度详细数据"):
             display_monthly = monthly_trend.copy()
-            display_monthly['月份'] = display_monthly['month']
+            display_monthly['月份'] = display_monthly['month'].apply(format_chinese_month)
             display_monthly['交易次数'] = display_monthly['transaction_count']
             display_monthly['总金额'] = display_monthly['total_amount'].round(2)
             display_monthly['平均价格'] = display_monthly['avg_price'].round(2)
@@ -421,6 +446,9 @@ def create_phase_analysis_tab(phase):
                             'color': '颜色'
                         }
                     )
+                    fig_top_products.update_traces(
+                        hovertemplate='<b>%{x}</b><br>销售额: ¥%{y:,.2f}<extra></extra>'
+                    )
                     fig_top_products.update_layout(
                         template="plotly_white",
                         xaxis_title="产品名称",
@@ -442,6 +470,9 @@ def create_phase_analysis_tab(phase):
                             'product_name': '产品名称',
                             'avg_price': '平均价格 (¥)'
                         }
+                    )
+                    fig_price_dist.update_traces(
+                        hovertemplate='<b>%{x}</b><br>平均价格: ¥%{y:.2f}<extra></extra>'
                     )
                     fig_price_dist.update_layout(
                         template="plotly_white",
@@ -512,32 +543,32 @@ def create_phase_analysis_tab(phase):
     except Exception as e:
         st.error(f"分析{phase}数据时出错: {str(e)}")
 
-# ==================== 总数分析 ====================
+# ==================== 总数分析优化 ====================
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_cached_total_stats():
     """缓存总数统计数据"""
     return analysis_service.get_statistics()
 
 def render_total_metrics(stats):
-    """渲染总数分析指标"""
+    """渲染总数分析指标 - 优化布局"""
     # 第一行指标
     cols1 = st.columns(4)
     metrics1 = [
-        ("总记录数", stats['total_records']),
-        ("主客户", stats['main_customers']),
-        ("子客户数", stats['sub_customers']),
-        ("产品颜色数", stats['unique_colors'])
+        ("总记录数", f"{stats['total_records']:,}"),
+        ("主客户", f"{stats['main_customers']:,}"),
+        ("子客户数", f"{stats['sub_customers']:,}"),
+        ("产品颜色数", f"{stats['unique_colors']:,}")
     ]
     
     for col, (label, value) in zip(cols1, metrics1):
         with col:
-            create_metric_card(label, value)
+            st.metric(label, value)
     
     # 第二行指标
     cols2 = st.columns(4)
     metrics2 = [
-        ("产品等级数", stats['unique_grades']),
+        ("产品等级数", f"{stats['unique_grades']:,}"),
         ("最低价格", f"¥{stats.get('min_price', 0):.2f}"),
         ("最高价格", f"¥{stats.get('max_price', 0):.2f}"),
         ("平均价格", f"¥{stats.get('avg_price', 0):.2f}")
@@ -600,6 +631,9 @@ def render_customer_analysis():
                     'customer_name': '客户名称',
                     'total_amount': '销售额（￥）'
                 }
+            )
+            fig_customer_sales.update_traces(
+                hovertemplate='<b>%{x}</b><br>销售额: ¥%{y:,.2f}<extra></extra>'
             )
             fig_customer_sales.update_layout(
                 template="plotly_white",
@@ -690,6 +724,9 @@ def render_product_analysis():
                     'grade': '产品等级'
                 },
             )
+            fig_top_products.update_traces(
+                hovertemplate='<b>%{x}</b><br>销售额: ¥%{y:,.2f}<extra></extra>'
+            )
             fig_top_products.update_layout(
                 template="plotly_white",
                 xaxis_title="产品名称 - 颜色",
@@ -712,6 +749,9 @@ def render_product_analysis():
                     'grade': '产品等级'
                 }
             )
+            fig_product_price.update_traces(
+                hovertemplate='<b>%{x}</b><br>平均价格: ¥%{y:.2f}<extra></extra>'
+            )
             fig_product_price.update_layout(
                 template="plotly_white",
                 xaxis_title="产品名称 - 颜色",
@@ -723,7 +763,7 @@ def render_product_analysis():
     return product_stats
 
 def render_time_trend_analysis():
-    """渲染时间趋势分析"""
+    """渲染时间趋势分析 - 优化中文月份显示"""
     st.subheader("📅 时间趋势分析")
     
     with get_connection() as conn:
@@ -744,7 +784,6 @@ def render_time_trend_analysis():
         col1, col2 = st.columns(2)
         
         with col1:
-            # 使用不同颜色区分两个图表
             fig_trend = create_trend_comparison_chart(
                 monthly_trend, 'total_amount', 'transaction_count',
                 "📊 销售额 vs 交易量 时间对比趋势",
@@ -765,7 +804,7 @@ def render_time_trend_analysis():
         # 月度详细数据表格
         st.subheader("📈 月度详细数据")
         display_monthly = monthly_trend.copy()
-        display_monthly['月份'] = display_monthly['month']
+        display_monthly['月份'] = display_monthly['month'].apply(format_chinese_month)
         display_monthly['交易次数'] = display_monthly['transaction_count']
         display_monthly['总金额'] = display_monthly['total_amount'].round(2)
         display_monthly['平均价格'] = display_monthly['avg_price'].round(2)
@@ -815,13 +854,19 @@ def render_total_analysis():
                 ''', conn)
             
             if not monthly_amount.empty:
+                # 转换为中文月份
+                monthly_amount = monthly_amount.copy()
+                monthly_amount['month_chinese'] = monthly_amount['month'].apply(format_chinese_month)
+                
                 fig_monthly = px.line(
-                    monthly_amount, x="month", y="total_amount",
+                    monthly_amount, x="month_chinese", y="total_amount",
                     title="📈 月度销售额趋势",
                     line_shape='spline', markers=True,
                     color_discrete_sequence=["#2563EB"]
                 )
-                fig_monthly.update_traces(hovertemplate="月份: %{x}<br>销售额: ¥%{y:,.2f}")
+                fig_monthly.update_traces(
+                    hovertemplate="月份: %{x}<br>销售额: ¥%{y:,.2f}<extra></extra>"
+                )
                 fig_monthly.update_layout(
                     template="plotly_white",
                     xaxis_title="月份",
@@ -846,11 +891,13 @@ def render_total_analysis():
                 ''', conn)
             
             if not color_sales.empty:
-                # 修复：使用实际列名，但显示中文标签
                 fig_color = create_bar_chart(
                     color_sales, 'color', 'total_amount',
                     "🎨 TOP10 产品颜色销售额",
                     x_label="产品颜色", y_label="销售额"
+                )
+                fig_color.update_traces(
+                    hovertemplate="产品颜色：%{x}<br>销售额: ¥%{y:,.2f}<extra></extra>"
                 )
                 if fig_color:
                     st.plotly_chart(fig_color, width='stretch')
@@ -887,11 +934,13 @@ def render_total_analysis():
             col1, col2 = st.columns(2)
             
             with col1:
-                # 修复：使用实际列名，但显示中文标签
                 fig_price_dist = create_bar_chart(
                     price_distribution, 'price_range', 'count',
                     "📦 价格区间交易分布",
                     x_label="价格区间", y_label="交易数量"
+                )
+                fig_price_dist.update_traces(
+                    hovertemplate="价格区间: %{x}<br>交易数量: %{y}<br>"
                 )
                 if fig_price_dist:
                     st.plotly_chart(fig_price_dist, width='stretch')
@@ -914,7 +963,8 @@ def render_total_analysis():
                     y=price_distribution['count'],
                     name="交易数量",
                     marker_color='#1f77b4',
-                    opacity=0.85
+                    opacity=0.85,
+                    hovertemplate='价格区间: %{x}<br>交易数量: %{y}<extra></extra>',
                 ))
                 fig.add_trace(go.Scatter(
                     x=price_distribution['price_range'], 
@@ -923,19 +973,26 @@ def render_total_analysis():
                     line_shape='spline', 
                     mode='lines+markers',
                     line=dict(color='#ff7f0e', width=3),
-                    yaxis='y2'
+                    yaxis='y2',
+                    hovertemplate='价格区间: %{x}<br>平均价格: ¥%{y:.2f}<extra></extra>'
                 ))
-                
                 fig.update_layout(
                     title="📈 价格分布与平均价格趋势",
                     template="plotly_white",
                     xaxis_title='价格区间',
                     yaxis=dict(title="交易数量"),
-                    yaxis2=dict(title="平均价格（￥）", overlaying='y', side='right'),
+                    yaxis2=dict(title="平均价格（￥）", overlaying='y', side='right', showgrid=False),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 )
                 st.plotly_chart(fig, width='stretch')
-        
+                # 添加价格集中度分析
+                st.markdown("**价格集中度分析**")
+                
+                # 计算价格分布的统计指标
+                max_count_range = price_distribution.loc[price_distribution['count'].idxmax()]
+                col_21, col_22 = st.columns(2)
+                with col_21:
+                    st.write(f"• **最密集区间**: ￥{max_count_range['price_range']} ({max_count_range['count']}笔)")
         # 客户分析
         st.markdown("---")
         customer_stats = render_customer_analysis()
@@ -948,7 +1005,7 @@ def render_total_analysis():
         st.markdown("---")
         monthly_trend = render_time_trend_analysis()
         
-        # 数据导出 - 修复导出功能
+        # 数据导出
         st.markdown("---")
         st.subheader("💾 数据导出")
         
