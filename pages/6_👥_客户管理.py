@@ -188,17 +188,16 @@ else:
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        col1.metric("总客户数", status["sub_customers"])
+        col1.metric("总客户数", status["sub_customers"],help="所有有过交易的主客户及子客户")
     
     with col2:
-        col2.metric("半年活跃客户", status["active_sub_customers_recent"],status["active_sub_customers_recent"]-status["active_sub_customers_this_year"])
+        col2.metric("主客户数", status["main_customers"])
 
-    
     with col3:
-        col3.metric("主客户数", status["main_customers"])
+        col3.metric("活跃客户", status["active_sub_customers_recent"],status["active_sub_customers_recent"]-status["active_sub_customers_this_year"],help="在过去半年内有过订单的客户")
     
     with col4:
-        col4.metric("子客户数", status["sub_customers"])
+        col4.metric("月活跃客户", status["active_sub_customers_this_month"],status["active_sub_customers_this_month"]-status["active_sub_customers_last_month"],help="在过去一个月内有过订单的客户")
 
     # 客户查询
     st.subheader("🔍 客户查询")

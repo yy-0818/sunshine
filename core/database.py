@@ -189,7 +189,7 @@ def get_database_status(days_threshold=30):
             db_size = 0
         status['db_size_mb'] = round(db_size, 2)
 
-        # 子客户数（唯一 customer_name, finance_id, sub_customer_name）
+        # 总客户or子客户数（唯一 customer_name, finance_id, sub_customer_name）
         cursor.execute("""
             SELECT COUNT(*) FROM (
                 SELECT DISTINCT customer_name, finance_id, sub_customer_name
