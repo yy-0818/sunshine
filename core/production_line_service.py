@@ -205,9 +205,102 @@ class ProductionLineService:
         Returns:
             dict: 汇总统计信息
         """
-        df = self.get_phase_data(phase)
+        if phase not in self.phase_configs:
+            raise ValueError(f"无效的阶段: {phase}")
         
-        if df.empty:
+        # 构建生产线条件
+        phase_conditions = []
+        params = []
+        for keyword in self.phase_configs[phase]['keywords']:
+            phase_conditions.append("production_line LIKE ?")
+            params.append(f'%{keyword}%')
+        
+        where_clause = f"({' OR '.join(phase_conditions)})"
+        
+        # 分别执行查询，避免复杂的子查询参数问题
+        try:
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # 基础统计查询
+                base_query = f"""
+                    SELECT 
+                        COUNT(*) as total_records,
+                        COALESCE(SUM(amount), 0) as total_amount,
+                        COALESCE(SUM(quantity), 0) as total_quantity,
+                        COALESCE(AVG(unit_price), 0) as avg_price,
+                        COUNT(DISTINCT product_name) as product_count,
+                        COUNT(DISTINCT color) as color_count,
+                        MIN(record_date) as start_date,
+                        MAX(record_date) as end_date
+                    FROM sales_records 
+                    WHERE {where_clause}
+                """
+                cursor.execute(base_query, params)
+                base_result = cursor.fetchone()
+                
+                # 主客户数查询（唯一 customer_name, finance_id）
+                main_customer_query = f"""
+                    SELECT COUNT(*) as main_customer_count
+                    FROM (
+                        SELECT DISTINCT customer_name, finance_id
+                        FROM sales_records 
+                        WHERE {where_clause}
+                        AND customer_name IS NOT NULL
+                        AND finance_id IS NOT NULL
+                    )
+                """
+                cursor.execute(main_customer_query, params)
+                main_customer_result = cursor.fetchone()
+                
+                # 子客户数查询（唯一 customer_name, finance_id, sub_customer_name）
+                sub_customer_query = f"""
+                    SELECT COUNT(*) as sub_customer_count
+                    FROM (
+                        SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                        FROM sales_records 
+                        WHERE {where_clause}
+                        AND customer_name IS NOT NULL 
+                        AND finance_id IS NOT NULL 
+                        AND sub_customer_name IS NOT NULL
+                    )
+                """
+                cursor.execute(sub_customer_query, params)
+                sub_customer_result = cursor.fetchone()
+            
+            if base_result and base_result['total_records'] > 0:
+                stats = {
+                    'total_records': base_result['total_records'],
+                    'total_amount': float(base_result['total_amount']) if base_result['total_amount'] else 0,
+                    'total_quantity': base_result['total_quantity'],
+                    'avg_price': float(base_result['avg_price']) if base_result['avg_price'] else 0,
+                    'customer_count': main_customer_result['main_customer_count'] if main_customer_result else 0,  # 保持原字段名
+                    'product_count': base_result['product_count'],
+                    'color_count': base_result['color_count'],
+                    'date_range': {
+                        'start': base_result['start_date'],
+                        'end': base_result['end_date']
+                    },
+                    # 额外返回子客户数用于调试
+                    'sub_customer_count': sub_customer_result['sub_customer_count'] if sub_customer_result else 0
+                }
+            else:
+                stats = {
+                    'total_records': 0,
+                    'total_amount': 0,
+                    'total_quantity': 0,
+                    'avg_price': 0,
+                    'customer_count': 0,
+                    'product_count': 0,
+                    'color_count': 0,
+                    'date_range': None,
+                    'sub_customer_count': 0
+                }
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"获取阶段 {phase} 汇总统计时出错: {e}")
             return {
                 'total_records': 0,
                 'total_amount': 0,
@@ -216,24 +309,9 @@ class ProductionLineService:
                 'customer_count': 0,
                 'product_count': 0,
                 'color_count': 0,
-                'date_range': None
+                'date_range': None,
+                'sub_customer_count': 0
             }
-        
-        stats = {
-            'total_records': len(df),
-            'total_amount': df['amount'].sum(),
-            'total_quantity': df['quantity'].sum(),
-            'avg_price': df['unit_price'].mean(),
-            'customer_count': df['customer_name'].nunique(),
-            'product_count': df['product_name'].nunique(),
-            'color_count': df['color'].nunique(),
-            'date_range': {
-                'start': df['record_date'].min(),
-                'end': df['record_date'].max()
-            }
-        }
-        
-        return stats
     
     def validate_classification(self, sample_size=100):
         """
