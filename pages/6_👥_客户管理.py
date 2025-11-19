@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from core.database import get_connection, get_database_status
+from datetime import datetime, timedelta
 
 st.logo(
     image='./assets/logo.png',
@@ -15,23 +16,28 @@ def load_customer_data():
     with get_connection() as conn:
         df = pd.read_sql_query('''
             SELECT 
-                id,
-                customer_name as 客户名称,
-                finance_id as 财务编号,
-                sub_customer_name as 子客户名称,
-                region as 区域,
-                contact_person as 联系人,
-                phone as 电话,
-                is_active as 是否活跃,
-                updated_date as 更新时间
-            FROM customers 
-            ORDER BY customer_name, sub_customer_name
+                c.id,
+                c.customer_name as 客户名称,
+                c.finance_id as 财务编号,
+                c.sub_customer_name as 子客户名称,
+                c.region as 区域,
+                c.contact_person as 联系人,
+                c.phone as 电话,
+                c.is_active as 是否活跃,
+                DATE(MAX(s.record_date)) as 最近交易日期
+            FROM customers c
+            LEFT JOIN sales_records s ON c.customer_name = s.customer_name 
+                AND c.finance_id = s.finance_id 
+                AND (c.sub_customer_name = s.sub_customer_name OR (c.sub_customer_name IS NULL AND s.sub_customer_name IS NULL))
+            GROUP BY c.id, c.customer_name, c.finance_id, c.sub_customer_name, c.region, c.contact_person, c.phone, c.is_active
+            ORDER BY c.customer_name, c.sub_customer_name
         ''', conn)
         
         # 处理空值
         df['区域'] = df['区域'].fillna('')
         df['联系人'] = df['联系人'].fillna('')
         df['电话'] = df['电话'].fillna('')
+        df['最近交易日期'] = df['最近交易日期'].fillna('无交易记录')
         
         return df
 
@@ -133,25 +139,18 @@ def add_customer_dialog():
             )
             
         st.markdown("**状态设置**")
-        # 使用toggle表示活跃状态，默认启用
         is_active = st.toggle(
             "启用客户",
             value=True,
             help="启用表示客户活跃，禁用表示客户停用"
         )
         
-        # 按钮布局
-        col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-        
-        
-        with col_btn2:
-            submitted = st.form_submit_button(
-                "💾 保存新客户",
-                width='stretch'
-            )
+        submitted = st.form_submit_button(
+            "💾 保存新客户",
+            width='stretch'
+        )
         
         if submitted:
-            # 验证必填字段
             if not new_customer_name.strip():
                 st.error("❌ 客户名称为必填字段")
             elif not new_finance_id.strip():
@@ -182,22 +181,27 @@ else:
         st.subheader("📊 客户统计")
     
     with col_header2:
-        if st.button("➕ 新增客户",width='stretch'):
+        if st.button("➕ 新增客户", width='stretch'):
             add_customer_dialog()
+    
     # 客户统计卡片
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        col1.metric("总客户数", status["sub_customers"],help="所有有过交易的主客户及子客户")
+        col1.metric("总客户数", status["sub_customers"], help="所有有过交易的主客户及子客户")
     
     with col2:
         col2.metric("主客户数", status["main_customers"])
 
     with col3:
-        col3.metric("活跃客户", status["active_sub_customers_recent"],status["active_sub_customers_recent"]-status["active_sub_customers_this_year"],help="在过去半年内有过订单的客户")
+        col3.metric("活跃客户", status["active_sub_customers_recent"], 
+                   status["active_sub_customers_recent"]-status["active_sub_customers_this_year"],
+                   help="在过去半年内有过订单的客户")
     
     with col4:
-        col4.metric("月活跃客户", status["active_sub_customers_this_month"],status["active_sub_customers_this_month"]-status["active_sub_customers_last_month"],help="在过去一个月内有过订单的客户")
+        col4.metric("月活跃客户", status["active_sub_customers_this_month"],
+                   status["active_sub_customers_this_month"]-status["active_sub_customers_last_month"],
+                   help="在过去一个月内有过订单的客户")
 
     # 客户查询
     st.subheader("🔍 客户查询")
@@ -208,16 +212,37 @@ else:
         search_term = st.text_input("搜索关键词", placeholder="输入客户名称、子客户名称或财务编号")
     
     with col_search2:
-        status_filter = st.selectbox(
-            "状态筛选",
-            ["全部", "活跃", "停用"]
-        )
+        status_filter = st.selectbox("状态筛选", ["全部", "活跃", "停用"])
     
     with col_search3:
-        customer_type = st.selectbox(
-            "客户类型",
-            ["全部", "仅主客户", "仅子客户"]
+        time_filter = st.selectbox(
+            "时间筛选",
+            ["全部时间", "最近一个月", "最近一个季度", "最近一年", "自定义范围"],
+            help="按最近交易时间筛选客户"
         )
+    
+    # 根据选择显示自定义日期范围
+    start_date = None
+    end_date = None
+    
+    if time_filter == "自定义范围":
+        col_date1, col_date2 = st.columns(2)
+        with col_date1:
+            start_date = st.date_input("开始日期", value=datetime.now() - timedelta(days=30))
+        with col_date2:
+            end_date = st.date_input("结束日期", value=datetime.now())
+    else:
+        # 设置预设时间范围
+        today = datetime.now().date()
+        if time_filter == "最近一个月":
+            start_date = today - timedelta(days=30)
+            end_date = today
+        elif time_filter == "最近一个季度":
+            start_date = today - timedelta(days=90)
+            end_date = today
+        elif time_filter == "最近一年":
+            start_date = today - timedelta(days=365)
+            end_date = today
     
     # 应用筛选条件
     filtered_df = customers_df.copy()
@@ -240,11 +265,18 @@ else:
             )
         ]
     
-    # 客户类型筛选
-    if customer_type == "仅主客户":
-        filtered_df = filtered_df[filtered_df['子客户名称'] == '']
-    elif customer_type == "仅子客户":
-        filtered_df = filtered_df[filtered_df['子客户名称'] != '']
+    # 时间维度筛选 - 最近交易时间
+    if time_filter != "全部时间" and start_date and end_date:
+        start_str = start_date.strftime('%Y-%m-%d')
+        end_str = end_date.strftime('%Y-%m-%d')
+        
+        time_mask = filtered_df['最近交易日期'] != '无交易记录'
+        time_mask = time_mask & (
+            filtered_df['最近交易日期'].apply(
+                lambda x: start_str <= str(x) <= end_str if x != '无交易记录' else False
+            )
+        )
+        filtered_df = filtered_df[time_mask]
 
     # 显示查询结果和表格编辑
     st.subheader(f"📋 客户列表 (共 {len(filtered_df)} 条记录)")
@@ -270,11 +302,10 @@ else:
                 "联系人": st.column_config.TextColumn("联系人"),
                 "电话": st.column_config.TextColumn("电话"),
                 "是否活跃": st.column_config.CheckboxColumn("是否活跃"),
-                "更新时间": st.column_config.DatetimeColumn("更新时间", disabled=True)
+                "最近交易日期": st.column_config.DateColumn("最近交易日期", disabled=True)
             },
             hide_index=True,
-            width='stretch',
-            num_rows="fixed"
+            width='stretch'
         )
         
         # 检查并保存表格中的更改
@@ -285,7 +316,6 @@ else:
                 original_row = display_df[display_df['id'] == row['id']].iloc[0]
                 updates = {}
                 
-                # 检查哪些字段被修改了
                 for col in ['区域', '联系人', '电话', '是否活跃']:
                     if str(row[col]) != str(original_row[col]):
                         updates[{
@@ -374,7 +404,6 @@ else:
                     )
                     
                 st.markdown("**状态设置**")
-                # 使用toggle表示活跃状态
                 current_status = selected_customer['是否活跃']
                 if isinstance(current_status, str):
                     is_active = current_status.lower() == 'true'
@@ -386,18 +415,13 @@ else:
                     value=is_active,
                     help="启用表示客户活跃，禁用表示客户停用"
                 )
-                    
                 
-                # 表单提交按钮
-                col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
-                with col_btn2:
-                    submitted = st.form_submit_button(
-                        "💾 保存详细修改",
-                        width='stretch'
-                    )
+                submitted = st.form_submit_button(
+                    "💾 保存详细修改",
+                    width='stretch'
+                )
                 
                 if submitted:
-                    # 验证必填字段
                     if not new_customer_name.strip() or not new_finance_id.strip():
                         st.error("❌ 客户名称和财务编号为必填字段")
                     else:
@@ -461,7 +485,7 @@ with st.expander("📚 使用说明", expanded=False):
     **筛选功能**
     - 支持关键词搜索（客户名称、财务编号、子客户名称）
     - 支持按状态筛选（活跃/停用）
-    - 支持按客户类型筛选（主客户/子客户）
+    - 支持按时间筛选（月/季/年/自定义）
     
     **数据导出**
     - 支持导出筛选后的客户列表
