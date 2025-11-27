@@ -1,9 +1,9 @@
 import sqlite3
-import pandas as pd
 import os
-from datetime import datetime
+import pandas as pd  # 添加这行
 from contextlib import contextmanager
 import logging
+import hashlib
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -103,9 +103,51 @@ def init_database():
                 change_reason TEXT,
                 FOREIGN KEY (sales_record_id) REFERENCES sales_records (id)
             )
+            ''',
+            # 古建欠款表
+            '''
+            CREATE TABLE IF NOT EXISTS department1_debt (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_code TEXT NOT NULL,
+                customer_name TEXT NOT NULL,
+                debt_2023 REAL DEFAULT 0,
+                debt_2024 REAL DEFAULT 0,
+                debt_2025 REAL DEFAULT 0,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(customer_code)
+            )
+            ''',
+            # 陶瓷欠款表
+            '''
+            CREATE TABLE IF NOT EXISTS department2_debt (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_code TEXT NOT NULL,
+                customer_name TEXT NOT NULL,
+                debt_2023 REAL DEFAULT 0,
+                debt_2024 REAL DEFAULT 0,
+                debt_2025 REAL DEFAULT 0,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(customer_code)
+            )
+            ''',
+            # 用户表（用于账号管理）
+            '''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',  -- 'admin', 'manager', 'user'
+                full_name TEXT,
+                department TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP
+            )
             '''
         ]
-
+        
         for i, script in enumerate(table_scripts):
             try:
                 cursor.execute(script)
@@ -123,9 +165,15 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_sales_customer_product ON sales_records(finance_id, sub_customer_name, color, grade, record_date)',
             'CREATE INDEX IF NOT EXISTS idx_sales_date_composite ON sales_records(year, month, day)',
             'CREATE INDEX IF NOT EXISTS idx_customer_finance ON customers(finance_id)',
-            # 新增生产线相关索引
-            'CREATE INDEX IF NOT EXISTS idx_production_line ON sales_records(production_line);',
-            'CREATE INDEX IF NOT EXISTS idx_production_line_date ON sales_records(production_line, record_date);'
+            # 修正：移除分号，使用逗号
+            'CREATE INDEX IF NOT EXISTS idx_production_line ON sales_records(production_line)',
+            'CREATE INDEX IF NOT EXISTS idx_production_line_date ON sales_records(production_line, record_date)',
+            # 欠款数据索引
+            'CREATE INDEX IF NOT EXISTS idx_dept1_customer_code ON department1_debt(customer_code)',
+            'CREATE INDEX IF NOT EXISTS idx_dept2_customer_code ON department2_debt(customer_code)',
+            # 账号索引
+            'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
+            'CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)'
         ]
         
         for i, script in enumerate(index_scripts):
@@ -137,6 +185,8 @@ def init_database():
         
         # 优化表结构检查
         _check_and_alter_tables(cursor)
+        # 创建默认用户
+        _create_default_users(cursor)
         
         logger.info("数据库初始化完成")
 
@@ -147,7 +197,10 @@ def _check_and_alter_tables(cursor):
         ('customers', 'contact_person', 'TEXT'),
         ('customers', 'phone', 'TEXT'),
         ('sales_records', 'product_name', 'TEXT'),
-        ('sales_records', 'ticket_number', 'TEXT')
+        ('sales_records', 'ticket_number', 'TEXT'),
+        # 添加新表的列检查（如果需要）
+        ('users', 'department', 'TEXT'),
+        ('users', 'last_login', 'TIMESTAMP')
     ]
     
     for table, column, col_type in columns_to_add:
@@ -159,6 +212,26 @@ def _check_and_alter_tables(cursor):
                 logger.debug(f"列 {table}.{column} 已存在")
             else:
                 logger.warning(f"列 {table}.{column} 添加失败: {e}")
+
+def _create_default_users(cursor):
+    """创建默认用户"""
+    default_users = [
+        ('admin', 'admin123', 'admin', '系统管理员', '销售部'),
+        ('manager', 'manager123', 'manager', '部门经理', '销售部'),
+        ('user', 'user123', 'user', '普通用户', '销售部')
+    ]
+    
+    for username, password, role, full_name, department in default_users:
+        try:
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            cursor.execute('''
+                INSERT OR IGNORE INTO users 
+                (username, password_hash, role, full_name, department)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (username, password_hash, role, full_name, department))
+            logger.info(f"创建默认用户: {username}")
+        except Exception as e:
+            logger.debug(f"用户 {username} 已存在或创建失败: {e}")
 
 def get_database_status(days_threshold=30):
     """获取数据库状态，统一统计关键指标
@@ -271,9 +344,40 @@ def get_database_status(days_threshold=30):
             status['active_sub_customers_rate_recent'] = 0
             status['active_sub_customers_rate_this_month'] = 0
 
+        # ================== 新增：欠款数据统计 ==================
+        try:
+            # 古建欠款统计
+            cursor.execute("SELECT COUNT(*) FROM department1_debt")
+            status['dept1_debt_count'] = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT SUM(debt_2025) FROM department1_debt")
+            dept1_total = cursor.fetchone()[0]
+            status['dept1_total_debt'] = dept1_total if dept1_total else 0
+            
+            # 陶瓷欠款统计
+            cursor.execute("SELECT COUNT(*) FROM department2_debt")
+            status['dept2_debt_count'] = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT SUM(debt_2025) FROM department2_debt")
+            dept2_total = cursor.fetchone()[0]
+            status['dept2_total_debt'] = dept2_total if dept2_total else 0
+            
+            # 用户统计
+            cursor.execute("SELECT COUNT(*) FROM users")
+            status['users_count'] = cursor.fetchone()[0]
+            
+        except Exception as e:
+            logger.warning(f"获取欠款数据统计时出错: {e}")
+            # 设置默认值
+            status.update({
+                'dept1_debt_count': 0,
+                'dept1_total_debt': 0,
+                'dept2_debt_count': 0,
+                'dept2_total_debt': 0,
+                'users_count': 0
+            })
+
     return status
-
-
 
 def optimize_database():
     """优化数据库"""
@@ -292,6 +396,10 @@ def clear_database():
         cursor.execute('DELETE FROM price_change_history')
         cursor.execute('DELETE FROM sales_records')
         cursor.execute('DELETE FROM customers')
+        cursor.execute('DELETE FROM department1_debt')
+        cursor.execute('DELETE FROM department2_debt')
+        # 保留users表，但清空非默认用户
+        cursor.execute("DELETE FROM users WHERE username NOT IN ('admin', 'manager', 'user')")
         # 重新启用外键约束
         cursor.execute("PRAGMA foreign_keys=ON")
     logger.info("数据库已清空")
@@ -315,3 +423,32 @@ def batch_insert_sales_records(records):
         except Exception as e:
             logger.error(f"批量插入失败: {e}")
             raise
+
+# 新增：用户认证相关函数
+def verify_user_credentials(username, password):
+    """验证用户凭据"""
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, username, role, full_name, department 
+            FROM users 
+            WHERE username = ? AND password_hash = ? AND is_active = TRUE
+        ''', (username, password_hash))
+        
+        user = cursor.fetchone()
+        return dict(user) if user else None
+
+def get_user_by_username(username):
+    """根据用户名获取用户信息"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, username, role, full_name, department, is_active
+            FROM users 
+            WHERE username = ?
+        ''', (username,))
+        
+        user = cursor.fetchone()
+        return dict(user) if user else None
