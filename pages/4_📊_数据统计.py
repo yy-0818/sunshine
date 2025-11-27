@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from core.analysis_service import AnalysisService
 from core.database import get_connection
 from core.production_line_service import ProductionLineService
+from utils.auth import require_login
 
 # 页面配置
 st.logo(
@@ -14,6 +15,8 @@ st.logo(
 
 st.set_page_config(page_title="数据统计", layout="wide")
 st.title("📊 数据统计分析")
+
+require_login()
 
 # 初始化服务
 analysis_service = AnalysisService()

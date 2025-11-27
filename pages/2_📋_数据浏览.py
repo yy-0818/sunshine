@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from core.database import get_connection, get_database_status
+from utils.auth import require_login
 
 st.logo(
     image='./assets/logo.png',
@@ -9,6 +10,8 @@ st.logo(
 
 st.set_page_config(page_title="数据浏览", layout="wide")
 st.title("📋 数据库数据浏览")
+
+require_login()
 
 # 获取所有表的数据
 def get_table_data(table_name):

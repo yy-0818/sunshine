@@ -5,10 +5,13 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from core.analysis_service import AnalysisService
 from core.database import get_connection
+from utils.auth import require_login
 
 st.logo(image='./assets/logo.png', icon_image='./assets/logo.png')
 st.set_page_config(page_title="价格趋势", layout="wide")
 st.title("📈 价格趋势分析")
+
+require_login()
 
 analysis_service = AnalysisService()
 

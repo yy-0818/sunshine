@@ -3,6 +3,7 @@ import pandas as pd
 import math
 from datetime import datetime, timedelta
 from core.database import get_connection
+from utils.auth import require_login
 
 # ==============================
 # ⚙️ 页面配置
@@ -10,6 +11,8 @@ from core.database import get_connection
 st.set_page_config(page_title="价格查询中心", layout="wide")
 st.logo(image='./assets/logo.png', icon_image='./assets/logo.png')
 st.title("🔍 价格查询中心")
+
+require_login()
 
 # ==============================
 # ⚙️ 全局常量与缓存配置

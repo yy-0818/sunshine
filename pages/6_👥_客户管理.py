@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from core.database import get_connection, get_database_status
 from datetime import datetime, timedelta
+from utils.auth import require_login, check_permission
 
 st.logo(
     image='./assets/logo.png',
@@ -10,6 +11,13 @@ st.logo(
 
 st.set_page_config(page_title="客户管理", layout="wide")
 st.title("👥 客户管理")
+
+require_login()
+
+# 检查管理员权限
+if not check_permission('admin'):
+    st.error("❌ 权限不足，需要管理员权限")
+    st.stop()
 
 # 获取客户数据的函数
 def load_customer_data():

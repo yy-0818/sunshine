@@ -4,6 +4,7 @@ import os
 from core.import_service import ImportService
 from utils.file_utils import validate_excel_structure, preview_excel_data
 from core.database import get_database_status
+from utils.auth import require_login
 
 # 页面配置
 st.set_page_config(page_title="数据导入", layout="wide")
@@ -110,6 +111,9 @@ def execute_import(file_path, strategy, replace_confirm):
         st.error(f"❌ 导入失败：{message}")
 
 def main():
+    
+    require_login()
+
     # 显示数据库状态
     st.markdown("### 🗃️ 当前数据库状态")
     render_database_status()
