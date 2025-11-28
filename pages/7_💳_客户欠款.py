@@ -10,6 +10,11 @@ from utils.data_processor import process_debt_excel_data, validate_debt_data, ge
 # 1. 配置与常量定义
 # -----------------------------------------------------------------------------
 
+st.logo(
+    image='./assets/logo.png',
+    icon_image='./assets/logo.png',
+)
+
 st.set_page_config(
     page_title="客户欠款分析系统",
     page_icon="💳",
