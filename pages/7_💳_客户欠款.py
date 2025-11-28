@@ -148,7 +148,7 @@ def render_data_import_tab(debt_service):
                             status.update(label="数据准备就绪", state="complete", expanded=False)
 
                         if not df_clean.empty:
-                            if st.button(f"🚀 确认导入{dept_type}数据", key=f"{key_prefix}_btn", type="primary", use_container_width=True):
+                            if st.button(f"🚀 确认导入{dept_type}数据", key=f"{key_prefix}_btn", type="primary", width='stretch'):
                                 success_count, error_count = import_func(df_clean)
                                 if error_count == 0:
                                     st.success(f"导入成功！新增/更新 {success_count} 条记录")
@@ -178,7 +178,7 @@ def render_data_import_tab(debt_service):
         
         **示例数据格式：**
         """)
-        st.dataframe(get_sample_data(), hide_index=True, use_container_width=True)
+        st.dataframe(get_sample_data(), hide_index=True, width='stretch')
 
 def render_analysis_view(df, title, icon):
     """
@@ -215,7 +215,7 @@ def render_analysis_view(df, title, icon):
         border=False
     )
     
-    m3.metric("需关注客户", high_risk_count, delta="风险预警", delta_color="inverse", border=False)
+    m3.metric("需关注客户", high_risk_count, border=False)
     m4.metric("优质客户(A级)", premium_count, border=False)
 
     st.divider()
@@ -241,7 +241,7 @@ def render_analysis_view(df, title, icon):
             height=350,
             xaxis={'categoryorder': 'array', 'categoryarray': list(RISK_COLORS.keys())}
         )
-        st.plotly_chart(fig_risk, use_container_width=True)
+        st.plotly_chart(fig_risk, width='stretch')
 
     with c2:
         st.subheader("🍰 客户类型构成")
@@ -256,7 +256,7 @@ def render_analysis_view(df, title, icon):
             height=350,
             legend_title="客户类型"
         )
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, width='stretch')
 
     # --- 数据详情与筛选区 ---
     st.subheader("🔍 详细数据查询")
@@ -299,7 +299,7 @@ def render_analysis_view(df, title, icon):
     st.dataframe(
         styled_df,
         column_config=get_column_config(),
-        use_container_width=True,
+        width='stretch',
         height=500,
         hide_index=True
     )
@@ -367,7 +367,7 @@ def render_comprehensive_tab(debt_service):
             color='来源部门'
         )
         fig_dept.update_layout(xaxis_title="部门", yaxis_title="欠款总额 (¥)")
-        st.plotly_chart(fig_dept, use_container_width=True)
+        st.plotly_chart(fig_dept, width='stretch')
     
     with c2:
         risk_dept = pd.crosstab(df_all['来源部门'], df_all['坏账风险'])
@@ -382,7 +382,7 @@ def render_comprehensive_tab(debt_service):
             color_continuous_scale='OrRd',
             labels=dict(x="风险等级", y="部门", color="客户数")
         )
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.plotly_chart(fig_heat, width='stretch')
 
     st.subheader("🌐 全局数据检索")
     with st.container(border=True):
@@ -403,7 +403,7 @@ def render_comprehensive_tab(debt_service):
     config["来源部门"] = st.column_config.TextColumn("所属部门", width="small")
 
     styled_view = apply_style(df_view[['来源部门', '客户代码', '客户名称', '2025欠款', '坏账风险', '客户价值等级', '23-25总变化']])
-    st.dataframe(styled_view, column_config=config, use_container_width=True, hide_index=True)
+    st.dataframe(styled_view, column_config=config, width='stretch', hide_index=True)
 
 def render_classification_help_tab(debt_service):
     """分类标准说明页面"""
