@@ -165,9 +165,9 @@ def check_permission(required_role):
 def get_role_display_name(role):
     """获取角色的显示名称"""
     role_mapping = {
-        'admin': '系统管理员',
-        'manager': '部门经理', 
-        'user': '普通用户'
+        'admin': '👑 系统管理员',
+        'manager': '👔 部门经理', 
+        'user': '👤 普通用户'
     }
     return role_mapping.get(role, role)
 
@@ -197,11 +197,7 @@ def login_form():
         username = st.text_input("用户名", placeholder="请输入用户名")
         password = st.text_input("密码", type="password", placeholder="请输入密码")
         
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            submit = st.form_submit_button("登录", use_container_width=True)
-        with col2:
-            show_info = st.form_submit_button("默认账号", use_container_width=True)
+        submit = st.form_submit_button("登录", width='stretch')
         
         if submit:
             if not username or not password:
@@ -213,21 +209,10 @@ def login_form():
             if user:
                 st.session_state.user = user
                 st.session_state.logged_in = True
-                st.success(f"欢迎回来，{user['full_name']}！")
+                st.toast(f"Hooray! {user['full_name']}", icon="🎉")
                 st.rerun()
             else:
                 st.error("用户名或密码错误")
                 return False
-        
-        if show_info:
-            with st.expander("默认测试账号信息", expanded=True):
-                st.info("""
-                **默认测试账号：**
-                - **系统管理员**: admin / admin123
-                - **部门经理**: manager / manager123  
-                - **普通用户**: user / user123
-                
-                💡 建议登录后立即修改默认密码
-                """)
     
     return True

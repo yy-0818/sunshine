@@ -16,7 +16,6 @@ st.logo(
     icon_image='./assets/logo.png',
 )
 
-
 def main():
     # 初始化数据库
     try:
@@ -39,7 +38,6 @@ def show_login_page():
     """显示登录页面"""
     st.title("🗿 陶瓷客户产品价格数据库")
     st.markdown("---")
-    
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -71,9 +69,7 @@ def show_main_page():
     require_login()
     
     # 显示用户信息
-    user = st.session_state.user
-    st.toast(f"Hooray! {user['full_name']}", icon="🎉")
-    st.sidebar.success(f"👤{user['full_name']} ({get_role_display_name(user['role'])})")
+    st.sidebar.success(f"👤{st.session_state.user['full_name']} ({get_role_display_name(st.session_state.user['role'])})")
     
     st.title("🗿 陶瓷客户产品价格数据库")
     st.markdown("---")

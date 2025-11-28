@@ -143,7 +143,7 @@ def render_user_list_tab(auth):
             "最后登录": st.column_config.TextColumn("最后登录", disabled=True)
         },
         hide_index=True,
-        use_container_width=True,
+        width='stretch',
         key="user_list_editor"
     )
     
@@ -175,17 +175,17 @@ def render_user_list_tab(auth):
         col_edit, col_del, col_export = st.columns([1, 1, 2])
         
         with col_edit:
-            if st.button("✏️ 编辑用户信息", use_container_width=True):
+            if st.button("✏️ 编辑用户信息", width='stretch'):
                 st.session_state.editing_user_id = selected_id
         
         with col_del:
             # 不能删除默认用户
             if selected_user['用户名'] not in ['admin', 'manager', 'user']:
-                if st.button("🗑️ 删除用户", use_container_width=True):
+                if st.button("🗑️ 删除用户", width='stretch'):
                     st.session_state.deleting_user_id = selected_id
             else:
                 st.button("🗑️ 删除用户", disabled=True, 
-                         help="不能删除系统默认用户", use_container_width=True)
+                         help="不能删除系统默认用户", width='stretch')
         
         with col_export:
             # 数据导出
@@ -195,7 +195,7 @@ def render_user_list_tab(auth):
                 csv_data,
                 "users_export.csv",
                 "text/csv",
-                use_container_width=True
+                width='stretch'
             )
     
     # 编辑用户对话框
@@ -266,11 +266,11 @@ def edit_user_dialog(auth, user_id, users):
         with col_save:
             submitted = st.form_submit_button(
                 "💾 保存更改",
-                use_container_width=True
+                width='stretch'
             )
         
         with col_cancel:
-            if st.form_submit_button("❌ 取消", use_container_width=True):
+            if st.form_submit_button("❌ 取消", width='stretch'):
                 if 'editing_user_id' in st.session_state:
                     del st.session_state.editing_user_id
                 st.rerun()
@@ -314,7 +314,7 @@ def delete_user_dialog(auth, user_id, users):
     col_confirm, col_cancel = st.columns(2)
     
     with col_confirm:
-        if st.button("✅ 确认删除", use_container_width=True, type="primary"):
+        if st.button("✅ 确认删除", width='stretch', type="primary"):
             success, message = auth.delete_user(user_id)
             if success:
                 st.success("✅ " + message)
@@ -325,7 +325,7 @@ def delete_user_dialog(auth, user_id, users):
                 st.error("❌ " + message)
     
     with col_cancel:
-        if st.button("❌ 取消", use_container_width=True):
+        if st.button("❌ 取消", width='stretch'):
             if 'deleting_user_id' in st.session_state:
                 del st.session_state.deleting_user_id
             st.rerun()
@@ -392,7 +392,7 @@ def render_create_user_tab(auth):
         
         submitted = st.form_submit_button(
             "👤 创建用户", 
-            use_container_width=True
+            width='stretch'
         )
         
         if submitted:
