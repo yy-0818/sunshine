@@ -249,7 +249,9 @@ def render_results(df):
     page_data = df.iloc[start_idx:end_idx]
 
     st.markdown(f"#### 📋 查询结果（共 {len(df):,} 条记录）")
-    st.dataframe(page_data, width='stretch', column_config={
+
+    
+    st.dataframe(page_data, width='stretch', hide_index=True, column_config={
         '单价':st.column_config.NumberColumn(format="¥%.2f",width='small'),
         '金额':st.column_config.NumberColumn(format="¥%.2f",width='small')
     })
@@ -266,7 +268,7 @@ def render_results(df):
 def main():
     st.subheader("📋 最新价格数据")
     latest_df = get_latest_prices()
-    st.dataframe(latest_df, width='stretch', column_config={
+    st.dataframe(latest_df, width='stretch', hide_index=True, column_config={
         '单价':st.column_config.NumberColumn(format="¥%.2f",width='small'),
         '金额':st.column_config.NumberColumn(format="¥%.2f",width='small')
     })

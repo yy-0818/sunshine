@@ -91,7 +91,7 @@ def get_column_config():
         "23-25总变化": st.column_config.NumberColumn("总变化趋势", format="¥%.2f", help="两年内的总欠款变化趋势"),
         "坏账风险": st.column_config.TextColumn("坏账风险", help="系统自动计算的风险评级", width="medium"),
         "客户价值等级": st.column_config.TextColumn("客户价值等级", width="medium"),
-        "客户代码": st.column_config.TextColumn("代码", width="small"),
+        "客户代码": st.column_config.TextColumn("客户代码", width="small"),
     }
 
 def render_sidebar_legend():
@@ -279,8 +279,6 @@ def render_analysis_view(df, title, icon):
     if value_filter:
         df_display = df_display[df_display['客户价值等级'].isin(value_filter)]
 
-    st.markdown(f"**共找到 {len(df_display)} 条记录**")
-    
     display_cols = [
         '客户代码', '客户名称', '2023欠款', '2024欠款', '2025欠款',
         '23-24变化', '24-25变化', '23-25总变化', '坏账风险', '客户价值等级'
@@ -293,13 +291,21 @@ def render_analysis_view(df, title, icon):
         highlight_value=show_val_color
     )
 
+    if len(df_display) <= 10:
+        dataframe_height = 'stretch'
+    else:
+        dataframe_height = 550
+
     st.dataframe(
         styled_df,
         column_config=get_column_config(),
         width='stretch',
-        height=500,
+        height=dataframe_height,
         hide_index=True
     )
+    
+    st.caption(f"共找到 {len(df_display)} 条记录")
+
 
 def render_comprehensive_tab(debt_service):
     """
