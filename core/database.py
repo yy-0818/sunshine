@@ -345,37 +345,25 @@ def get_database_status(days_threshold=30):
             status['active_sub_customers_rate_this_month'] = 0
 
         # ================== 新增：欠款数据统计 ==================
-        try:
-            # 古建欠款统计
-            cursor.execute("SELECT COUNT(*) FROM department1_debt")
-            status['dept1_debt_count'] = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT SUM(debt_2025) FROM department1_debt")
-            dept1_total = cursor.fetchone()[0]
-            status['dept1_total_debt'] = dept1_total if dept1_total else 0
-            
-            # 陶瓷欠款统计
-            cursor.execute("SELECT COUNT(*) FROM department2_debt")
-            status['dept2_debt_count'] = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT SUM(debt_2025) FROM department2_debt")
-            dept2_total = cursor.fetchone()[0]
-            status['dept2_total_debt'] = dept2_total if dept2_total else 0
-            
-            # 用户统计
-            cursor.execute("SELECT COUNT(*) FROM users")
-            status['users_count'] = cursor.fetchone()[0]
-            
-        except Exception as e:
-            logger.warning(f"获取欠款数据统计时出错: {e}")
-            # 设置默认值
-            status.update({
-                'dept1_debt_count': 0,
-                'dept1_total_debt': 0,
-                'dept2_debt_count': 0,
-                'dept2_total_debt': 0,
-                'users_count': 0
-            })
+        # 古建欠款统计
+        cursor.execute("SELECT COUNT(*) FROM department1_debt")
+        status['dept1_debt_count'] = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT SUM(debt_2025) FROM department1_debt")
+        dept1_total = cursor.fetchone()[0]
+        status['dept1_total_debt'] = dept1_total if dept1_total else 0
+        
+        # 陶瓷欠款统计
+        cursor.execute("SELECT COUNT(*) FROM department2_debt")
+        status['dept2_debt_count'] = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT SUM(debt_2025) FROM department2_debt")
+        dept2_total = cursor.fetchone()[0]
+        status['dept2_total_debt'] = dept2_total if dept2_total else 0
+        
+        # 用户统计
+        cursor.execute("SELECT COUNT(*) FROM users")
+        status['users_count'] = cursor.fetchone()[0]
 
     return status
 
