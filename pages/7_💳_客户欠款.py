@@ -197,7 +197,7 @@ def render_analysis_view(df, title, icon):
     change_val = total_2025 - total_2024
     
     # 统计高风险客户 (根据实际风险名称)
-    high_risk_keywords = ['中风险坏账', '高风险坏账', '关注类(欠款增加)']
+    high_risk_keywords = ['中风险坏账', '高风险坏账']
     high_risk_count = len(df[df['坏账风险'].isin(high_risk_keywords)])
     premium_count = len(df[df['客户价值等级'] == 'A级-优质客户'])
     
@@ -205,8 +205,6 @@ def render_analysis_view(df, title, icon):
     m1, m2, m3, m4 = st.columns(4)
     
     m1.metric("总客户数", len(df), border=False)
-    
-    # 更新：展示2025总欠款及较去年的变化，保留两位小数
     m2.metric(
         "2025欠款总额", 
         f"¥{total_2025:,.2f}", 
@@ -214,9 +212,8 @@ def render_analysis_view(df, title, icon):
         delta_color="inverse",  # 红色代表增加(坏)，绿色代表减少(好)
         border=False
     )
-    
-    m3.metric("需关注客户", high_risk_count, border=False)
-    m4.metric("优质客户(A级)", premium_count, border=False)
+    m3.metric("需关注客户", high_risk_count, border=False, help="中高风险坏账客户")
+    m4.metric("优质客户", premium_count, border=False, help="A级-优质客户")
 
     st.divider()
 

@@ -38,7 +38,7 @@ def show_login_page():
     """显示登录页面"""
     st.title("🗿 陶瓷客户产品价格数据库")
     st.markdown("---")
-    col1, col2 = st.columns([2, 1])
+    col1, col2 = st.columns([1, 1])
     
     with col1:
         st.subheader("🔐 欢迎使用")
@@ -176,28 +176,12 @@ def render_dashboard():
 
 def render_sidebar_status():
     """侧边栏状态显示"""
-    # try:
-        # status = get_database_status()
-        # 
-        # st.sidebar.markdown("### 📊 数据库状态")
-        # 
-        # col1, col2 = st.sidebar.columns(2)
-        # with col1:
-        #     st.metric("客户", status.get('sub_customers', 0))
-        # with col2:
-        #     st.metric("销售记录", status.get('sales_records_count', 0))
-        
-        # 数据库信息
-        # st.sidebar.markdown("---")
-        # st.sidebar.markdown("### ℹ️ 系统信息")
-        # st.sidebar.info(f"数据库大小: {status.get('db_size_mb', 0):.1f} MB")
-        
-        # 用户信息
-    #     user = st.session_state.user
-    #     st.sidebar.markdown("### 👤 用户信息")
-    #     st.sidebar.text(f"姓名: {user['full_name']}")
-    #     st.sidebar.text(f"角色: {user['role']}")
-    #     st.sidebar.text(f"部门: {user['department']}")
+    # 用户信息
+    # user = st.session_state.user
+    # st.sidebar.markdown("### 👤 用户信息")
+    # st.sidebar.text(f"姓名: {user['full_name']}")
+    # st.sidebar.text(f"角色: {user['role']}")
+    # st.sidebar.text(f"部门: {user['department']}")
         
     # except Exception as e:
     #     st.sidebar.error("获取数据库状态失败")
