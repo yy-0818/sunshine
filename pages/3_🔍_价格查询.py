@@ -250,8 +250,11 @@ def render_results(df):
 
     st.markdown(f"#### 📋 查询结果（共 {len(df):,} 条记录）")
 
-    
-    st.dataframe(page_data, width='stretch', hide_index=True, column_config={
+    if len(page_data) <= 10:
+        dataframe_height = 'stretch'
+    else:
+        dataframe_height = 550
+    st.dataframe(page_data, width='stretch',height=dataframe_height, hide_index=True, column_config={
         '单价':st.column_config.NumberColumn(format="¥%.2f",width='small'),
         '金额':st.column_config.NumberColumn(format="¥%.2f",width='small')
     })
