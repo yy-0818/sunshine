@@ -1,74 +1,90 @@
 import pandas as pd
 import warnings
+import os
+from openpyxl import load_workbook
+from typing import Tuple, Dict, Any
+
+import os
+import pandas as pd
+import warnings
 from openpyxl import load_workbook
 from typing import Tuple, Dict, Any
 
 def validate_excel_structure(file_path: str) -> Tuple[bool, str]:
     """验证Excel文件结构并进行表头映射"""
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            wb = load_workbook(file_path, data_only=True, read_only=True)
-            sheet = wb.active
-            
-            # 获取表头
-            headers = []
-            for cell in sheet[1]:
-                if cell.value is not None:
-                    headers.append(str(cell.value).strip())
-            
-            wb.close()
-            
-            # 定义表头映射关系：原始表头 -> 标准表头
-            header_mapping = {
-                '备注（小客户名称）': '子客户名称',
-                '票 号': '票号',  # 统一空格处理
-                '品牌': '备注'   # 将"品牌"映射为"备注"
-            }
-            
-            # 应用表头映射
-            mapped_headers = []
-            for header in headers:
-                # 先去除空格进行匹配
-                header_no_space = header.replace(' ', '')
-                mapped_header = header
-                
-                # 检查是否有映射关系
-                for original, standard in header_mapping.items():
-                    if header_no_space == original.replace(' ', ''):
-                        mapped_header = standard
-                        break
-                
-                mapped_headers.append(mapped_header)
-            
-            # 必需的表头（映射后的标准表头）
-            required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '收款金额', '颜色', '等级', '数量', '单价', '金额', '余额', '票号', '备注', '生产线']
-            
-            # 去除空格后的表头用于匹配
-            mapped_headers_no_space = [h.replace(' ', '') for h in mapped_headers]
-            required_headers_no_space = [h.replace(' ', '') for h in required_headers]
-            
-            missing_headers = []
-            for req_header, req_header_ns in zip(required_headers, required_headers_no_space):
-                if req_header_ns not in mapped_headers_no_space:
-                    missing_headers.append(req_header)
-            
-            if missing_headers:
-                return False, f"缺少必要的表头: {missing_headers}"
-            
-            return True, "文件结构正确"
+        # 直接使用pandas读取，让它自动选择引擎
+        try:
+            df = pd.read_excel(file_path, engine=None, nrows=1)
+        except Exception as e:
+            # 如果自动选择失败，尝试手动选择
+            file_ext = os.path.splitext(file_path)[1].lower()
+            if file_ext == '.xls':
+                # 检查是否安装了xlrd
+                try:
+                    import xlrd
+                    df = pd.read_excel(file_path, engine='xlrd', nrows=1)
+                except ImportError:
+                    return False, "需要安装xlrd库来处理.xls文件。请运行: pip install xlrd"
+            else:
+                # 尝试openpyxl
+                df = pd.read_excel(file_path, engine='openpyxl', nrows=1)
+        
+        # 获取表头
+        headers = [str(col).strip() for col in df.columns]
+        
+        # 应用表头映射
+        mapped_headers = []
+        header_mapping = {
+            '备注（小客户名称）': '子客户名称',
+            '票 号': '票号',
+            '品牌': '备注'
+        }
+        
+        for header in headers:
+            header_no_space = header.replace(' ', '')
+            mapped_header = header
+            for original, standard in header_mapping.items():
+                if header_no_space == original.replace(' ', ''):
+                    mapped_header = standard
+                    break
+            mapped_headers.append(mapped_header)
+        
+        # 必需的表头（映射后的标准表头）
+        required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '收款金额', '颜色', '等级', '数量', '单价', '金额', '余额', '票号', '备注', '生产线']
+        
+        # 去除空格后的表头用于匹配
+        mapped_headers_no_space = [h.replace(' ', '') for h in mapped_headers]
+        required_headers_no_space = [h.replace(' ', '') for h in required_headers]
+        
+        missing_headers = []
+        for req_header, req_header_ns in zip(required_headers, required_headers_no_space):
+            if req_header_ns not in mapped_headers_no_space:
+                missing_headers.append(req_header)
+        
+        if missing_headers:
+            return False, f"缺少必要的表头: {missing_headers}"
+        
+        return True, "文件结构正确"
         
     except Exception as e:
         return False, f"文件检查失败: {str(e)}"
 
 def preview_excel_data(file_path: str, nrows: int = 5) -> Tuple[bool, pd.DataFrame]:
-    """预览Excel数据（应用表头映射）"""
+    """预览Excel数据（应用表头映射），支持.xls和.xlsx格式"""
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             
+            # 根据文件扩展名选择引擎
+            file_ext = os.path.splitext(file_path)[1].lower()
+            if file_ext == '.xls':
+                engine = 'xlrd'
+            else:
+                engine = 'openpyxl'
+            
             # 先读取原始数据
-            df = pd.read_excel(file_path, engine='openpyxl', nrows=nrows)
+            df = pd.read_excel(file_path, engine=engine, nrows=nrows)
             
             # 应用表头映射
             df = apply_header_mapping(df)
@@ -109,86 +125,114 @@ def apply_header_mapping(df: pd.DataFrame) -> pd.DataFrame:
     return df_mapped
 
 def get_excel_file_info(file_path: str) -> Dict[str, Any]:
-    """获取Excel文件的详细信息（应用表头映射）"""
+    """获取Excel文件的详细信息（应用表头映射），支持.xls和.xlsx格式"""
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            wb = load_workbook(file_path, data_only=True, read_only=True)
-            sheet = wb.active
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        if file_ext == '.xls':
+            # 使用xlrd读取.xls文件
+            import xlrd
+            wb = xlrd.open_workbook(file_path, on_demand=True)
+            sheet = wb.sheet_by_index(0)
             
             # 获取原始表头
             original_headers = []
-            for cell in sheet[1]:
-                if cell.value is not None:
-                    original_headers.append(str(cell.value).strip())
-            
-            # 应用表头映射
-            mapped_headers = []
-            header_mapping = {
-                '备注（小客户名称）': '子客户名称',
-                '票 号': '票号',
-                '品牌': '备注'
-            }
-            
-            for header in original_headers:
-                header_no_space = header.replace(' ', '')
-                mapped_header = header
-                for original, standard in header_mapping.items():
-                    if header_no_space == original.replace(' ', ''):
-                        mapped_header = standard
-                        break
-                mapped_headers.append(mapped_header)
+            for col_idx in range(sheet.ncols):
+                cell_value = sheet.cell_value(0, col_idx)
+                if cell_value is not None:
+                    original_headers.append(str(cell_value).strip())
             
             # 统计行数（不包括表头）
             row_count = 0
-            for row_idx, row in enumerate(sheet.iter_rows(min_row=2, max_row=100000), 2):
-                if row[0].value is not None:
+            for row_idx in range(1, min(100000, sheet.nrows)):
+                if sheet.cell_value(row_idx, 0) is not None:
                     row_count += 1
-                else:
-                    break
             
-            wb.close()
+            wb.release_resources()
             
-            # 读取数据并应用表头映射
-            df = pd.read_excel(file_path, engine='openpyxl', nrows=1000)
-            df = apply_header_mapping(df)
-            
-            # 创建去除空格后的列名映射
-            column_mapping = {}
-            for col in df.columns:
-                col_no_space = col.replace(' ', '')
-                column_mapping[col_no_space] = col
-            
-            info = {
-                "original_headers": original_headers,
-                "mapped_headers": mapped_headers,
-                "headers": mapped_headers,  # 保持兼容性
-                "row_count": row_count,
-                "column_count": len(mapped_headers),
-                "required_headers_present": True,
-                "sample_data_available": len(df) > 0 if not df.empty else False,
-                "column_mapping": column_mapping
-            }
-            
-            # 如果数据不为空，添加更多统计信息
-            if not df.empty:
-                # 使用映射后的列名
-                customer_col = '客户名称'
-                product_col = '产品名称' if '产品名称' in df.columns else None
-                color_col = '颜色'
-                quantity_col = '数量'
-                price_col = '单价'
-                amount_col = '金额'
+        elif file_ext in ['.xlsx', '.xlsm']:
+            # 使用openpyxl读取.xlsx文件
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                wb = load_workbook(file_path, data_only=True, read_only=True)
+                sheet = wb.active
                 
-                info.update({
-                    "customer_count": df[customer_col].nunique() if customer_col in df.columns else 0,
-                    "product_count": df[product_col].nunique() if product_col and product_col in df.columns else 0,
-                    "color_count": df[color_col].nunique() if color_col in df.columns else 0,
-                    "has_numeric_data": any(col in df.columns for col in [quantity_col, price_col, amount_col])
-                })
+                # 获取原始表头
+                original_headers = []
+                for cell in sheet[1]:
+                    if cell.value is not None:
+                        original_headers.append(str(cell.value).strip())
+                
+                # 统计行数（不包括表头）
+                row_count = 0
+                for row_idx, row in enumerate(sheet.iter_rows(min_row=2, max_row=100000), 2):
+                    if row[0].value is not None:
+                        row_count += 1
+                    else:
+                        break
+                
+                wb.close()
+        else:
+            return {"error": f"不支持的文件格式: {file_ext}"}
+        
+        # 应用表头映射
+        mapped_headers = []
+        header_mapping = {
+            '备注（小客户名称）': '子客户名称',
+            '票 号': '票号',
+            '品牌': '备注'
+        }
+        
+        for header in original_headers:
+            header_no_space = header.replace(' ', '')
+            mapped_header = header
+            for original, standard in header_mapping.items():
+                if header_no_space == original.replace(' ', ''):
+                    mapped_header = standard
+                    break
+            mapped_headers.append(mapped_header)
+        
+        # 读取数据并应用表头映射
+        engine = 'xlrd' if file_ext == '.xls' else 'openpyxl'
+        df = pd.read_excel(file_path, engine=engine, nrows=1000)
+        df = apply_header_mapping(df)
+        
+        # 创建去除空格后的列名映射
+        column_mapping = {}
+        for col in df.columns:
+            col_no_space = col.replace(' ', '')
+            column_mapping[col_no_space] = col
+        
+        info = {
+            "original_headers": original_headers,
+            "mapped_headers": mapped_headers,
+            "headers": mapped_headers,  # 保持兼容性
+            "row_count": row_count,
+            "column_count": len(mapped_headers),
+            "required_headers_present": True,
+            "sample_data_available": len(df) > 0 if not df.empty else False,
+            "column_mapping": column_mapping
+        }
+        
+        # 如果数据不为空，添加更多统计信息
+        if not df.empty:
+            # 使用映射后的列名
+            customer_col = '客户名称'
+            product_col = '产品名称' if '产品名称' in df.columns else None
+            color_col = '颜色'
+            quantity_col = '数量'
+            price_col = '单价'
+            amount_col = '金额'
             
-            return info
-            
+            info.update({
+                "customer_count": df[customer_col].nunique() if customer_col in df.columns else 0,
+                "product_count": df[product_col].nunique() if product_col and product_col in df.columns else 0,
+                "color_count": df[color_col].nunique() if color_col in df.columns else 0,
+                "has_numeric_data": any(col in df.columns for col in [quantity_col, price_col, amount_col])
+            })
+        
+        return info
+        
     except Exception as e:
         return {"error": f"获取文件信息失败: {str(e)}"}
 

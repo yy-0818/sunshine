@@ -96,6 +96,11 @@ def execute_import(file_path, strategy, replace_confirm):
         st.error("请确认执行完全覆盖操作！")
         return
     
+    # 调试信息
+    st.write(f"文件路径: {file_path}")
+    st.write(f"文件存在: {os.path.exists(file_path)}")
+    st.write(f"文件大小: {os.path.getsize(file_path) if os.path.exists(file_path) else 'N/A'} 字节")
+    
     with st.spinner("正在导入数据，请稍候..."):
         success, message = import_service.import_excel_data(
             file_path, "user", update_strategy=strategy
