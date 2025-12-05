@@ -51,7 +51,7 @@ def validate_excel_structure(file_path: str) -> Tuple[bool, str]:
             mapped_headers.append(mapped_header)
         
         # 必需的表头（映射后的标准表头）
-        required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '收款金额', '颜色', '等级', '数量', '单价', '金额', '余额', '票号', '备注', '生产线']
+        required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '颜色', '等级', '数量', '单价', '金额', '票号', '备注', '生产线']
         
         # 去除空格后的表头用于匹配
         mapped_headers_no_space = [h.replace(' ', '') for h in mapped_headers]

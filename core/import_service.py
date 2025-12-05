@@ -6,15 +6,14 @@ from datetime import datetime
 import logging
 from typing import Tuple, List, Dict, Any
 import numpy as np
-import os
 
 # 配置日志
 logger = logging.getLogger(__name__)
 
 class ImportService:
     def __init__(self):
-        # 更新必需表头列表，与 file_utils 保持一致
-        self.required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '颜色', '等级', '数量', '单价', '金额']
+        # 更新必需表头列表（最小必填）：仅前三列必填
+        self.required_headers = ['客户名称', '编号', '子客户名称']
         
         # 预编译正则表达式
         self.clean_pattern = re.compile(r'\s+')
@@ -82,28 +81,38 @@ class ImportService:
             return False, f"数据导入失败: {str(e)}"
     
     def _read_excel_optimized(self, file_path: str) -> pd.DataFrame:
-        """优化Excel读取性能，自动检测可用引擎"""
-        try:
-            # 首先尝试让pandas自动选择引擎
-            df = pd.read_excel(file_path, engine=None)
-            return df
-        except Exception as e:
-            # 如果自动选择失败，尝试手动选择
-            file_ext = os.path.splitext(file_path)[1].lower()
+        """优化Excel读取性能"""
+        # 使用更兼容的dtype设置
+        dtype_spec = {
+            '客户名称': 'object',
+            '编号': 'object',
+            '子客户名称': 'object',
+            '年': 'object',
+            '月': 'object',
+            '日': 'object',
+            '颜色': 'object',
+            '等级': 'object',
+            '数量': 'object',
+            '单价': 'object',
+            '金额': 'object'
+        }
+        
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # 读取所有列，然后在内存中处理
+            df = pd.read_excel(
+                file_path, 
+                engine='openpyxl',
+                dtype=dtype_spec,
+                na_values=['', ' ', 'NULL', 'null', 'None'],
+                keep_default_na=True
+            )
             
-            if file_ext == '.xls':
-                try:
-                    # 尝试使用xlrd
-                    df = pd.read_excel(file_path, engine='xlrd')
-                except ImportError:
-                    raise ImportError("需要安装xlrd库来处理.xls文件，请运行: pip install xlrd")
-            elif file_ext in ['.xlsx', '.xlsm']:
-                # 尝试使用openpyxl
-                df = pd.read_excel(file_path, engine='openpyxl')
-            else:
-                raise ValueError(f"不支持的文件格式: {file_ext}")
-            
-            return df
+            # 应用表头映射，确保列名一致性
+            df = self._apply_header_mapping(df)
+            df = df.dropna(subset=['客户名称'], how='all')
+        
+        return df
     
     def _apply_header_mapping(self, df: pd.DataFrame) -> pd.DataFrame:
         """应用表头映射到DataFrame"""

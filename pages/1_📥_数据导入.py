@@ -4,7 +4,6 @@ import os
 from core.import_service import ImportService
 from utils.file_utils import validate_excel_structure, preview_excel_data
 from core.database import get_database_status
-from utils.auth import require_login
 
 # 页面配置
 st.set_page_config(page_title="数据导入", layout="wide")
@@ -55,7 +54,7 @@ def render_database_status():
 def show_example_format():
     """显示表格格式示例"""
     with st.expander("📋 查看Excel表格格式要求", expanded=False):
-        st.info("请确保您的Excel文件包含以下列，并按照此格式组织数据：")
+        st.info("请确保Excel文件至少包含前3列（必填），其余列按需填写：")
         
         # 创建示例数据
         example_data = {
@@ -74,20 +73,25 @@ def show_example_format():
             "余额": ["", ""],
             "票号": ["0618YG049", "0619YG050"],
             "备注": ["", ""],
-            "生产线": ["三线罗曼瓦", "三线罗曼瓦"]
+            "生产线": ["三线罗曼瓦", "三线罗曼瓦"],
+            "区域": ["衡阳", "衡阳"],
+            "联系人": ["张三", "李四"],
+            "电话": ["13800000000", "13800000001"],
+            "是否活跃": [1, 1]
         }
         
         example_df = pd.DataFrame(example_data)
-        st.dataframe(example_df, width='stretch')
+        st.dataframe(example_df, use_container_width=True)
         
         # 添加格式要求说明
         st.markdown("""
         **📝 格式要求说明：**
-        - 必须包含以上所有列标题
-        - 列顺序可以调整，但列名必须一致
-        - 日期请分别填入年、月、日列
-        - 可以为空的列：收款金额、余额、备注
-        - 数值列：数量、单价、金额必须为有效数字
+        - 必填列：`客户名称`、`编号`、`备注（小客户名称）`
+        - 其余列可为空；建议按需填写以便更完整分析
+        - 列顺序可调整，但列名需一致；`票 号` 将自动识别为 `票号`
+        - 日期请分别填入年、月、日列；缺失时系统将自动填充当前日期用于记录
+        - 数值列（数量、单价、金额、收款金额、余额）可为空；若填写需为有效数字
+        - `品牌` 将作为分析维度保留；`生产线`用于“一期/二期”分类分析
         """)
 
 def execute_import(file_path, strategy, replace_confirm):
@@ -95,11 +99,6 @@ def execute_import(file_path, strategy, replace_confirm):
     if strategy == "replace" and not replace_confirm:
         st.error("请确认执行完全覆盖操作！")
         return
-    
-    # 调试信息
-    st.write(f"文件路径: {file_path}")
-    st.write(f"文件存在: {os.path.exists(file_path)}")
-    st.write(f"文件大小: {os.path.getsize(file_path) if os.path.exists(file_path) else 'N/A'} 字节")
     
     with st.spinner("正在导入数据，请稍候..."):
         success, message = import_service.import_excel_data(
@@ -116,9 +115,6 @@ def execute_import(file_path, strategy, replace_confirm):
         st.error(f"❌ 导入失败：{message}")
 
 def main():
-    
-    require_login()
-
     # 显示数据库状态
     st.markdown("### 🗃️ 当前数据库状态")
     render_database_status()
@@ -200,7 +196,7 @@ def main():
         ok, preview = preview_excel_data(temp_path, 5)
         if ok:
             st.success(f"成功读取数据，共 {len(preview)} 行记录")
-            st.dataframe(preview, width='stretch')
+            st.dataframe(preview, use_container_width=True)
             
             # 显示数据统计
             cols = st.columns(3)
