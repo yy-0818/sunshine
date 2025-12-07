@@ -279,11 +279,11 @@ def render_data_import_tab(debt_service):
                                 "debt_2025": st.column_config.NumberColumn("2025欠款", format="¥%.2f"),
                             },
                             hide_index=True,
-                            use_container_width=True
+                            width='stretch'
                         )
                         
                         # 导入按钮
-                        if st.button(f"🚀 确认导入{dept_type}数据", key=f"{key_prefix}_btn", type="primary", use_container_width=True):
+                        if st.button(f"🚀 确认导入{dept_type}数据", key=f"{key_prefix}_btn", type="primary", width='stretch'):
                             with st.spinner(f"正在导入{dept_type}数据..."):
                                 success_count, error_count = import_func(df_clean)
                                 
@@ -334,7 +334,7 @@ def render_data_import_tab(debt_service):
         # 示例数据
         st.markdown("### 示例数据格式：")
         sample_df = get_sample_data()
-        st.dataframe(sample_df, hide_index=True, use_container_width=True)
+        st.dataframe(sample_df, hide_index=True, width='stretch')
         
         # 提供模板下载
         csv = sample_df.to_csv(index=False).encode('utf-8-sig')
@@ -431,7 +431,7 @@ def render_analysis_view(df, title, icon):
                 showlegend=True,
                 margin=dict(t=50, b=20, l=20, r=20)
             )
-            st.plotly_chart(fig_risk, use_container_width=True)
+            st.plotly_chart(fig_risk, width='stretch')
         else:
             st.info("暂无风险分类数据")
     
@@ -452,7 +452,7 @@ def render_analysis_view(df, title, icon):
                 showlegend=False
             )
             fig_type.update_traces(texttemplate='%{text}', textposition='outside')
-            st.plotly_chart(fig_type, use_container_width=True)
+            st.plotly_chart(fig_type, width='stretch')
     
     with tab_chart3:
         # 欠款金额分布
@@ -479,7 +479,7 @@ def render_analysis_view(df, title, icon):
                 showlegend=False
             )
             fig_debt.update_traces(texttemplate='%{text}', textposition='outside')
-            st.plotly_chart(fig_debt, use_container_width=True)
+            st.plotly_chart(fig_debt, width='stretch')
 
     # --- 详细数据查询区 ---
     st.subheader("🔍 详细数据查询")
@@ -563,7 +563,7 @@ def render_analysis_view(df, title, icon):
     st.dataframe(
         styled_df,
         column_config=get_column_config(),
-        use_container_width=True,
+        width='stretch',
         height=min(600, 100 + len(df_filtered) * 35),
         hide_index=True
     )
@@ -690,7 +690,7 @@ def render_comprehensive_tab(debt_service):
                 height=350
             )
             fig_dept.update_traces(textposition='outside')
-            st.plotly_chart(fig_dept, use_container_width=True)
+            st.plotly_chart(fig_dept, width='stretch')
     
     with col_chart2:
         # 部门客户数对比
@@ -707,7 +707,7 @@ def render_comprehensive_tab(debt_service):
             )
             fig_counts.update_traces(textposition='inside', textinfo='percent+label')
             fig_counts.update_layout(height=350)
-            st.plotly_chart(fig_counts, use_container_width=True)
+            st.plotly_chart(fig_counts, width='stretch')
 
     # --- 全局数据检索 ---
     st.subheader("🌐 全局数据检索")
@@ -768,7 +768,7 @@ def render_comprehensive_tab(debt_service):
     st.dataframe(
         styled_view,
         column_config=config,
-        use_container_width=True,
+        width='stretch',
         height=min(500, 100 + len(df_view) * 35),
         hide_index=True
     )
@@ -781,7 +781,7 @@ def render_comprehensive_tab(debt_service):
             data=csv,
             file_name=f"全局数据检索_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
-            use_container_width=True
+            width='stretch'
         )
 
 def render_integrated_analysis_tab(integration_service):
@@ -963,7 +963,7 @@ def render_integrated_analysis_tab(integration_service):
                 showlegend=False
             )
             fig_level.update_traces(textposition='outside')
-            st.plotly_chart(fig_level, use_container_width=True)
+            st.plotly_chart(fig_level, width='stretch')
     
     with tab_chart2:
         if '风险等级' in integrated_df.columns:
@@ -986,7 +986,7 @@ def render_integrated_analysis_tab(integration_service):
             )
             fig_risk.update_traces(textposition='inside', textinfo='percent+label')
             fig_risk.update_layout(height=400)
-            st.plotly_chart(fig_risk, use_container_width=True)
+            st.plotly_chart(fig_risk, width='stretch')
     
     with tab_chart3:
         if '所属部门' in integrated_df.columns and '风险等级' in integrated_df.columns:
@@ -1001,7 +1001,7 @@ def render_integrated_analysis_tab(integration_service):
                 aspect="auto"
             )
             fig_heat.update_layout(height=400)
-            st.plotly_chart(fig_heat, use_container_width=True)
+            st.plotly_chart(fig_heat, width='stretch')
     
     with tab_chart4:
         if '总销售额' in integrated_df.columns and '2025欠款' in integrated_df.columns:
@@ -1080,7 +1080,7 @@ def render_integrated_analysis_tab(integration_service):
                     except:
                         pass  # 如果无法计算趋势线，跳过
                 
-                st.plotly_chart(fig_scatter, use_container_width=True)
+                st.plotly_chart(fig_scatter, width='stretch')
             else:
                 st.info("📊 暂无有效的销售欠款数据用于散点图分析")
     
@@ -1123,6 +1123,8 @@ def render_integrated_analysis_tab(integration_service):
                 placeholder="输入客户名称或财务编号..."
             )
         with col_display:
+            st.write('')
+            st.write('')
             show_colors = st.toggle("🎨 显示颜色", value=True, help="显示等级颜色高亮")
     
     # 应用筛选
@@ -1172,7 +1174,7 @@ def render_integrated_analysis_tab(integration_service):
         st.dataframe(
             styled_df,
             column_config=get_column_config(),
-            use_container_width=True,
+            width='stretch',
             height=min(600, 100 + len(filtered_df) * 35),
             hide_index=True
         )
@@ -1198,7 +1200,7 @@ def render_integrated_analysis_tab(integration_service):
                 data=csv,
                 file_name=f"客户综合信用分析_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
-                use_container_width=True
+                width='stretch'
             )
 
 def render_customer_detail_view(integration_service):
@@ -1292,7 +1294,7 @@ def render_customer_detail_view(integration_service):
                             "production_line": st.column_config.TextColumn("生产线")
                         },
                         hide_index=True,
-                        use_container_width=True
+                        width='stretch'
                     )
                 else:
                     st.info("📭 暂无销售记录")
@@ -1326,7 +1328,7 @@ def render_customer_detail_view(integration_service):
                                 height=300,
                                 showlegend=False
                             )
-                            st.plotly_chart(fig_debt, use_container_width=True)
+                            st.plotly_chart(fig_debt, width='stretch')
                         
                         with col_debt2:
                             # 欠款部门分布
@@ -1343,7 +1345,7 @@ def render_customer_detail_view(integration_service):
                                     height=300,
                                     showlegend=True
                                 )
-                                st.plotly_chart(fig_dept, use_container_width=True)
+                                st.plotly_chart(fig_dept, width='stretch')
                     
                     # 欠款数据表格
                     st.dataframe(
@@ -1356,7 +1358,7 @@ def render_customer_detail_view(integration_service):
                             "debt_2025": st.column_config.NumberColumn("2025欠款", format="¥%.2f")
                         },
                         hide_index=True,
-                        use_container_width=True
+                        width='stretch'
                     )
                 else:
                     st.info("💰 暂无欠款记录")
@@ -1373,7 +1375,7 @@ def render_customer_detail_view(integration_service):
                                 data=sales_csv,
                                 file_name=f"{customer_name}_销售记录_{datetime.now().strftime('%Y%m%d')}.csv",
                                 mime="text/csv",
-                                use_container_width=True
+                                width='stretch'
                             )
                     
                     with col_export2:
@@ -1384,7 +1386,7 @@ def render_customer_detail_view(integration_service):
                                 data=debt_csv,
                                 file_name=f"{customer_name}_欠款记录_{datetime.now().strftime('%Y%m%d')}.csv",
                                 mime="text/csv",
-                                use_container_width=True
+                                width='stretch'
                             )
             
             except Exception as e:
