@@ -414,7 +414,7 @@ def render_analysis_view(df, title, icon):
     # --- 图表分析区 ---
     st.subheader("📊 数据分析")
     
-    tab_chart1, tab_chart2, tab_chart3 = st.tabs(["风险分布", "客户类型", "欠款趋势"])
+    tab_chart1, tab_chart2, tab_chart3 = st.columns(3)
     
     with tab_chart1:
         if '坏账风险' in df.columns:
@@ -429,7 +429,6 @@ def render_analysis_view(df, title, icon):
             fig_risk.update_traces(textposition='inside', textinfo='percent+label')
             fig_risk.update_layout(
                 showlegend=True,
-                height=400,
                 margin=dict(t=50, b=20, l=20, r=20)
             )
             st.plotly_chart(fig_risk, use_container_width=True)
@@ -450,7 +449,6 @@ def render_analysis_view(df, title, icon):
             fig_type.update_layout(
                 xaxis_title="客户类型",
                 yaxis_title="客户数量",
-                height=400,
                 showlegend=False
             )
             fig_type.update_traces(texttemplate='%{text}', textposition='outside')
@@ -478,7 +476,6 @@ def render_analysis_view(df, title, icon):
             fig_debt.update_layout(
                 xaxis_title="欠款区间 (元)",
                 yaxis_title="客户数量",
-                height=400,
                 showlegend=False
             )
             fig_debt.update_traces(texttemplate='%{text}', textposition='outside')
@@ -596,16 +593,25 @@ def render_comprehensive_tab(debt_service):
         st.warning("📭 暂无数据，请先导入数据。")
         return
 
-    # 分析数据
+    # 分析数据 - 只在合并前分析一次
     if not df1.empty:
-        df1 = debt_service.analyze_debt_data(df1)
-        df1['所属部门'] = '古建'
+        df1_analyzed = debt_service.analyze_debt_data(df1)
+        df1_analyzed['所属部门'] = '古建'
+    else:
+        df1_analyzed = pd.DataFrame()
+    
     if not df2.empty:
-        df2 = debt_service.analyze_debt_data(df2)
-        df2['所属部门'] = '陶瓷'
+        df2_analyzed = debt_service.analyze_debt_data(df2)
+        df2_analyzed['所属部门'] = '陶瓷'
+    else:
+        df2_analyzed = pd.DataFrame()
 
-    # 合并数据
-    df_all = pd.concat([df1, df2], ignore_index=True)
+    # 合并数据 - 只在最后合并一次
+    df_all = pd.concat([df1_analyzed, df2_analyzed], ignore_index=True)
+    
+    if df_all.empty:
+        st.warning("📭 合并后无数据")
+        return
 
     st.header("📈 全公司欠款综合看板")
     
@@ -792,7 +798,7 @@ def render_integrated_analysis_tab(integration_service):
         with col_param1:
             analysis_year = st.selectbox(
                 "📅 分析年份",
-                options=[25, 24, 23, 22],
+                options=[25, 24, 23],
                 index=0,
                 format_func=lambda x: f"20{x}年",
                 help="选择分析的主要销售年份"
@@ -811,7 +817,7 @@ def render_integrated_analysis_tab(integration_service):
                 "💰 最低销售额筛选",
                 min_value=0,
                 value=0,
-                step=1000,
+                step=10000,
                 help="只显示销售额大于此值的客户"
             )
     
@@ -831,6 +837,24 @@ def render_integrated_analysis_tab(integration_service):
             # 应用销售额筛选
             if min_sales > 0 and '总销售额' in integrated_df.columns:
                 integrated_df = integrated_df[integrated_df['总销售额'] >= min_sales]
+
+            if not integrated_df.empty:
+                # 确保财务编号是字符串类型
+                if '财务编号' in integrated_df.columns:
+                    integrated_df['财务编号'] = integrated_df['财务编号'].astype(str)
+                
+                # 检查并清理重复数据
+                dup_check_cols = []
+                if '财务编号' in integrated_df.columns:
+                    dup_check_cols.append('财务编号')
+                if '所属部门' in integrated_df.columns:
+                    dup_check_cols.append('所属部门')
+                
+                if dup_check_cols:
+                    duplicate_mask = integrated_df.duplicated(subset=dup_check_cols, keep='first')
+                    if duplicate_mask.any():
+                        st.warning(f"⚠️ 发现 {duplicate_mask.sum()} 条重复记录，已自动清理")
+                        integrated_df = integrated_df[~duplicate_mask].reset_index(drop=True)
             
         except Exception as e:
             st.error(f"❌ 数据获取失败: {str(e)}")
@@ -844,7 +868,7 @@ def render_integrated_analysis_tab(integration_service):
     premium_customers = len(integrated_df[integrated_df['客户综合等级'].str.startswith('A-')]) if '客户综合等级' in integrated_df.columns else 0
     high_risk_customers = len(integrated_df[integrated_df['风险等级'].isin(['高风险', '较高风险'])]) if '风险等级' in integrated_df.columns else 0
     
-    total_sales = integrated_df['总销售额'].sum() if '总销售额' in integrated_df.columns else 0
+    total_sales = integrated_df['总销售额'].sum()
     total_debt = integrated_df['2025欠款'].sum() if '2025欠款' in integrated_df.columns else 0
     debt_sales_ratio = (total_debt / total_sales * 100) if total_sales > 0 else 0
     avg_risk_score = integrated_df['风险评分'].mean() if '风险评分' in integrated_df.columns else 0
@@ -856,7 +880,6 @@ def render_integrated_analysis_tab(integration_service):
         st.metric(
             "总客户数",
             f"{total_customers:,}",
-            "位整合客户",
             help="包含销售和欠款数据的客户总数"
         )
     
@@ -1187,30 +1210,31 @@ def render_customer_detail_view(integration_service):
     col_input, col_example = st.columns([2, 1])
     
     with col_input:
-        finance_id = st.text_input(
-            "请输入财务编号",
-            placeholder="例如：413-001",
-            key="finance_id_input",
-            help="输入统一的财务编号格式"
+        """采用客户名称 避免编号重叠"""
+        customer_name = st.text_input(
+            "请输入客户名称",
+            placeholder="例如：岳阳招罗甘威",
+            key="customer_name_input",
+            help="输入客户名称（支持模糊匹配）"
         )
     
     with col_example:
-        st.caption("📋 示例格式:")
-        st.caption("• 413-001")
-        st.caption("• 413-029")
-        st.caption("• 413-049")
+        st.caption("📋 示例客户名称:")
+        st.caption("• 岳阳招罗甘威")
+        st.caption("• 永州永州市陈跃军")
+        st.caption("• 鑫帅辉-九方昌盛")
     
-    if finance_id:
+    if customer_name:
         with st.spinner("🔍 正在获取客户详情..."):
             try:
-                customer_detail = integration_service.get_customer_detail(finance_id)
+                customer_detail = integration_service.get_customer_detail(customer_name)
                 
                 if customer_detail['sales_records'].empty and customer_detail['debt_records'].empty:
-                    st.warning(f"❌ 未找到财务编号为 {finance_id} 的客户数据")
+                    st.warning(f"❌ 未找到名称为 '{customer_name}' 的客户数据")
                     return
                 
                 # 客户概览
-                st.subheader(f"📋 客户概览 - {finance_id}")
+                st.subheader(f"📋 客户概览 - {customer_name}")
                 
                 col_overview1, col_overview2, col_overview3, col_overview4 = st.columns(4)
                 
@@ -1347,7 +1371,7 @@ def render_customer_detail_view(integration_service):
                             st.download_button(
                                 label="📥 导出销售记录",
                                 data=sales_csv,
-                                file_name=f"{finance_id}_销售记录_{datetime.now().strftime('%Y%m%d')}.csv",
+                                file_name=f"{customer_name}_销售记录_{datetime.now().strftime('%Y%m%d')}.csv",
                                 mime="text/csv",
                                 use_container_width=True
                             )
@@ -1358,7 +1382,7 @@ def render_customer_detail_view(integration_service):
                             st.download_button(
                                 label="📥 导出欠款记录",
                                 data=debt_csv,
-                                file_name=f"{finance_id}_欠款记录_{datetime.now().strftime('%Y%m%d')}.csv",
+                                file_name=f"{customer_name}_欠款记录_{datetime.now().strftime('%Y%m%d')}.csv",
                                 mime="text/csv",
                                 use_container_width=True
                             )
