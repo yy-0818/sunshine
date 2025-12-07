@@ -108,28 +108,28 @@ def init_database():
             '''
             CREATE TABLE IF NOT EXISTS department1_debt (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                customer_code TEXT NOT NULL,
+                finance_id TEXT NOT NULL,  -- 新增：统一格式的代码
                 customer_name TEXT NOT NULL,
                 debt_2023 REAL DEFAULT 0,
                 debt_2024 REAL DEFAULT 0,
                 debt_2025 REAL DEFAULT 0,
                 created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(customer_code)
+                UNIQUE(finance_id)
             )
             ''',
             # 陶瓷欠款表
             '''
             CREATE TABLE IF NOT EXISTS department2_debt (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                customer_code TEXT NOT NULL,
+                finance_id TEXT NOT NULL,  -- 新增：统一格式的代码
                 customer_name TEXT NOT NULL,
                 debt_2023 REAL DEFAULT 0,
                 debt_2024 REAL DEFAULT 0,
                 debt_2025 REAL DEFAULT 0,
                 created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(customer_code)
+                UNIQUE(finance_id)
             )
             ''',
             # 用户表（用于账号管理）
@@ -169,8 +169,8 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_production_line ON sales_records(production_line)',
             'CREATE INDEX IF NOT EXISTS idx_production_line_date ON sales_records(production_line, record_date)',
             # 欠款数据索引
-            'CREATE INDEX IF NOT EXISTS idx_dept1_customer_code ON department1_debt(customer_code)',
-            'CREATE INDEX IF NOT EXISTS idx_dept2_customer_code ON department2_debt(customer_code)',
+            # 'CREATE INDEX IF NOT EXISTS idx_dept1_customer_code ON department1_debt(customer_code)',
+            # 'CREATE INDEX IF NOT EXISTS idx_dept2_customer_code ON department2_debt(customer_code)',
             # 账号索引
             'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
             'CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)'

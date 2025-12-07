@@ -5,7 +5,7 @@ import re
 def process_debt_excel_data(df, department_name=""):
     """
     处理欠款Excel数据
-    支持多种格式的客户代码处理
+    统一财务编号格式：将点(.)替换为短横线(-)
     """
     data = []
     
@@ -18,8 +18,8 @@ def process_debt_excel_data(df, department_name=""):
         
         # 只处理以2203开头的有效行
         if customer_code.startswith('2203'):
-            # 多种方式处理客户代码
-            processed_code = clean_customer_code(customer_code)
+            # 统一财务编号格式：将点替换为短横线
+            finance_id = clean_finance_id(customer_code)
             
             # 确保金额字段是数值类型
             try:
@@ -38,12 +38,12 @@ def process_debt_excel_data(df, department_name=""):
                 debt_2025 = 0.0
             
             row_data = {
-                '客户代码': processed_code,
-                '客户名称': str(df.iloc[i, 1]) if pd.notna(df.iloc[i, 1]) else f"未知客户_{processed_code}",
-                '2023欠款': debt_2023,
-                '2024欠款': debt_2024,
-                '2025欠款': debt_2025,
-                '数据来源': department_name
+                'finance_id': finance_id,  # 使用统一格式的财务编号
+                'customer_name': str(df.iloc[i, 1]) if pd.notna(df.iloc[i, 1]) else f"未知客户_{finance_id}",
+                'debt_2023': debt_2023,
+                'debt_2024': debt_2024,
+                'debt_2025': debt_2025,
+                'data_source': department_name
             }
             data.append(row_data)
     
@@ -57,25 +57,24 @@ def process_debt_excel_data(df, department_name=""):
     
     return result_df
 
-def clean_customer_code(customer_code):
-    """清理客户代码，移除2203前缀"""
-    code_str = str(customer_code).strip()
+def clean_finance_id(finance_id):
+    """
+    清理财务编号，统一格式
+    将点(.)替换为短横线(-)，并移除2203前缀
+    """
+    code_str = str(finance_id).strip()
     
-    # 方法1: 直接替换 '2203.'
-    if '2203.' in code_str:
-        return code_str.replace('2203.', '')
+    # 移除2203前缀
+    if code_str.startswith('2203'):
+        code_str = code_str[4:]
+        # 移除可能的分隔符（点、短横线）
+        if code_str.startswith('.') or code_str.startswith('-'):
+            code_str = code_str[1:]
     
-    # 方法2: 移除前4个字符 '2203'
-    elif code_str.startswith('2203'):
-        return code_str[4:]
+    # 统一格式：将点替换为短横线
+    code_str = code_str.replace('.', '-')
     
-    # 方法3: 使用正则表达式移除2203前缀
-    elif re.match(r'^2203[\.\-\s]?', code_str):
-        return re.sub(r'^2203[\.\-\s]?', '', code_str)
-    
-    # 如果都不匹配，返回原值
-    else:
-        return code_str
+    return code_str
 
 def validate_debt_data(df):
     """验证欠款数据的完整性"""
@@ -86,18 +85,18 @@ def validate_debt_data(df):
         return issues
     
     # 检查必要的列
-    required_columns = ['客户代码', '客户名称', '2023欠款', '2024欠款', '2025欠款']
+    required_columns = ['finance_id', 'customer_name', 'debt_2023', 'debt_2024', 'debt_2025']
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         issues.append(f"缺少必要的列: {missing_columns}")
     
-    # 检查客户代码唯一性
-    duplicate_codes = df[df.duplicated('客户代码', keep=False)]
-    if not duplicate_codes.empty:
-        issues.append(f"发现重复的客户代码: {duplicate_codes['客户代码'].unique().tolist()}")
+    # 检查财务编号唯一性
+    duplicate_ids = df[df.duplicated('finance_id', keep=False)]
+    if not duplicate_ids.empty:
+        issues.append(f"发现重复的财务编号: {duplicate_ids['finance_id'].unique().tolist()}")
     
     # 检查金额数据的有效性
-    amount_columns = ['2023欠款', '2024欠款', '2025欠款']
+    amount_columns = ['debt_2023', 'debt_2024', 'debt_2025']
     for col in amount_columns:
         if col in df.columns:
             invalid_amounts = df[~df[col].apply(lambda x: isinstance(x, (int, float)) or pd.isna(x))]
