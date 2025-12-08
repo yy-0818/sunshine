@@ -212,12 +212,15 @@ def render_filters():
         )
 
 
-def render_pagination_controls(current_page, total_pages, total_records):
+def render_pagination_controls(current_page, total_pages, total_records, df):
     """分页样式"""
-    col1, col2 = st.columns([2.5, 0.3])
+    col1, col2, col3 = st.columns([1.5, 1.5, 0.5])
     with col1:
         st.caption(f"第 {current_page} / {total_pages} 页，共 {total_records:,} 条记录")
     with col2:
+        Allprice = df["金额"].sum()
+        st.caption(f"💰 筛选总金额: {Allprice:.2f}")
+    with col3:
         new_page = st.number_input(
             "页码",
             min_value=1,
@@ -259,7 +262,7 @@ def render_results(df):
         '金额':st.column_config.NumberColumn(format="¥%.2f",width='small')
     })
 
-    render_pagination_controls(current_page, total_pages, len(df))
+    render_pagination_controls(current_page, total_pages, len(df), df)
 
     csv_data = df.to_csv(index=False, encoding='utf-8-sig')
     st.download_button("📥 导出查询结果", csv_data, "销售记录查询结果.csv", "text/csv", width='stretch')
@@ -280,7 +283,6 @@ def main():
     col1, col2 = st.columns([4, .75]) 
     with col1: 
         st.caption(f"共 {len(latest_df):,} 条记录")
-
     with col2: 
         csv_data = latest_df.to_csv(index=False, encoding='utf-8-sig') 
         st.download_button( "📥 导出最新价格数据", csv_data, "最新价格数据.csv", "text/csv", width='stretch')
