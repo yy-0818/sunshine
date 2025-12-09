@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 from core.debt_service import DebtAnalysisService
 from core.customer_analysis import SalesDebtIntegrationService
+from core.database import get_connection
 from utils.auth import require_login
 from utils.data_processor import process_debt_excel_data, validate_debt_data, get_sample_data
 
@@ -26,84 +27,62 @@ st.set_page_config(
 
 # 专业的风险色阶 (背景色)
 RISK_COLORS = {
-    '无风险': '#E8F5E9',           # 极淡绿 (安全)
-    '正常跟踪': '#E1F5FE',         # 极淡蓝 (正常)
-    '关注类(欠款增加)': '#FFF8E1',  # 极淡黄 (警告)
-    '中风险坏账': '#FFF3E0',       # 极淡橙 (较高风险)
-    '高风险坏账': '#FFEBEE'        # 极淡红 (高危)
+    '低风险': '#E8F5E9',           # 极淡绿 (安全)
+    '较低风险': '#E1F5FE',         # 极淡蓝 (正常)
+    '中等风险': '#FFF8E1',         # 极淡黄 (警告)
+    '较高风险': '#FFF3E0',         # 极淡橙 (较高风险)
+    '高风险': '#FFEBEE'            # 极淡红 (高危)
 }
 
 # 风险文本颜色
 RISK_TEXT_COLORS = {
-    '无风险': '#2E7D32',           # 深绿
-    '正常跟踪': '#0277BD',         # 深蓝
-    '关注类(欠款增加)': '#F9A825',  # 深黄
-    '中风险坏账': '#EF6C00',       # 深橙
-    '高风险坏账': '#C62828'        # 深红
+    '低风险': '#2E7D32',           # 深绿
+    '较低风险': '#0277BD',         # 深蓝
+    '中等风险': '#F9A825',         # 深黄
+    '较高风险': '#EF6C00',         # 深橙
+    '高风险': '#C62828'            # 深红
 }
 
-# 客户价值色阶
-VALUE_COLORS = {
-    'A级-优质客户': '#d1e7dd',
-    'B级-良好客户': '#d2f4ea',
-    'C级-小额欠款': '#cff4fc',
-    'C级-中等欠款': '#e0cffc',
-    'D级-风险客户': '#fff3cd',
-    'D级-大额欠款': '#ffe5d0',
-    'E级-高风险客户': '#f8d7da'
-}
-
-# 综合等级颜色
-INTEGRATED_COLORS = {
-    'A-优质大客户': '#1b5e20',      # 深绿
-    'A-优质活跃客户': '#2e7d32',    # 绿
-    'B-大额休眠客户': '#388e3c',    # 中绿
-    'B-一般客户': '#43a047',        # 浅绿
-    'B1-低风险活跃欠款': '#1565c0', # 深蓝
-    'B2-低风险欠款': '#1976d2',     # 蓝
-    'C-小额客户': '#757575',        # 灰
-    'C1-中风险持续欠款': '#f57c00', # 橙
-    'C2-中风险欠款': '#ff9800',     # 浅橙
-    'D-无销售无欠款': '#bdbdbd',    # 浅灰
-    'D1-高风险持续欠款': '#d32f2f', # 深红
-    'D2-高风险欠款': '#e53935',     # 红
-    'E-纯欠款客户': '#b71c1c'       # 深红
+# 综合等级到风险等级的映射
+INTEGRATED_TO_RISK = {
+    'A-优质大客户': '低风险',
+    'A-优质活跃客户': '低风险',
+    'B-大额休眠客户': '较低风险',
+    'B-一般客户': '较低风险',
+    'B1-低风险活跃欠款': '较低风险',
+    'B2-低风险欠款': '较低风险',
+    'C-小额客户': '中等风险',
+    'C1-中风险持续欠款': '较高风险',
+    'C2-中风险欠款': '较高风险',
+    'D-无销售无欠款': '中等风险',
+    'D1-高风险持续欠款': '高风险',
+    'D2-高风险欠款': '高风险',
+    'E-纯欠款客户': '高风险'
 }
 
 # 风险评分颜色映射
 RISK_SCORE_COLORS = {
-    (80, 100): '#4CAF50',   # 绿
-    (60, 80): '#8BC34A',    # 浅绿
-    (40, 60): '#FFC107',    # 黄
-    (20, 40): '#FF9800',    # 橙
-    (0, 20): '#F44336'      # 红
+    (80, 100): '#E8F5E9',   # 低风险背景色
+    (60, 80): '#E1F5FE',    # 较低风险背景色
+    (40, 60): '#FFF8E1',    # 中等风险背景色
+    (20, 40): '#FFF3E0',    # 较高风险背景色
+    (0, 20): '#FFEBEE'      # 高风险背景色
 }
 
 # -----------------------------------------------------------------------------
 # 2. 工具函数
 # -----------------------------------------------------------------------------
 
-def apply_style(df, highlight_risk=True, highlight_value=True, highlight_integrated=False):
+def apply_style(df, highlight_integrated=True, highlight_score=True):
     """为 DataFrame 应用 Pandas Styler"""
     styler = df.style
 
-    def get_risk_style(val):
-        bg_color = RISK_COLORS.get(val, '')
-        text_color = RISK_TEXT_COLORS.get(val, '#333333')
-        if bg_color:
-            return f'background-color: {bg_color}; color: {text_color}; font-weight: 500;'
-        return ''
-
-    def get_value_style(val):
-        bg_color = VALUE_COLORS.get(val, '')
-        if bg_color:
-            return f'background-color: {bg_color}; color: #333333; font-weight: 500;'
-        return ''
-    
     def get_integrated_style(val):
-        bg_color = INTEGRATED_COLORS.get(val, '')
+        # 映射综合等级到风险等级
+        risk_level = INTEGRATED_TO_RISK.get(val, '较低风险')
+        bg_color = RISK_COLORS.get(risk_level, '')
+        text_color = RISK_TEXT_COLORS.get(risk_level, '#333333')
         if bg_color:
-            text_color = '#FFFFFF' if val in ['A-优质大客户', 'A-优质活跃客户', 'D1-高风险持续欠款', 'D2-高风险欠款', 'E-纯欠款客户'] else '#333333'
             return f'background-color: {bg_color}; color: {text_color}; font-weight: 500;'
         return ''
     
@@ -113,20 +92,24 @@ def apply_style(df, highlight_risk=True, highlight_value=True, highlight_integra
         val = float(val)
         for (low, high), color in RISK_SCORE_COLORS.items():
             if low <= val < high:
-                text_color = '#FFFFFF' if val < 40 else '#333333'
+                # 为风险评分设置对应的文本颜色
+                if high > 80:
+                    text_color = '#2E7D32'  # 深绿
+                elif high > 60:
+                    text_color = '#0277BD'  # 深蓝
+                elif high > 40:
+                    text_color = '#F9A825'  # 深黄
+                elif high > 20:
+                    text_color = '#EF6C00'  # 深橙
+                else:
+                    text_color = '#C62828'  # 深红
                 return f'background-color: {color}; color: {text_color}; font-weight: bold;'
         return ''
 
-    if highlight_risk and '坏账风险' in df.columns:
-        styler = styler.map(get_risk_style, subset=['坏账风险'])
-    
-    if highlight_value and '客户价值等级' in df.columns:
-        styler = styler.map(get_value_style, subset=['客户价值等级'])
-    
     if highlight_integrated and '客户综合等级' in df.columns:
         styler = styler.map(get_integrated_style, subset=['客户综合等级'])
     
-    if '风险评分' in df.columns:
+    if highlight_score and '风险评分' in df.columns:
         styler = styler.map(get_risk_score_style, subset=['风险评分'])
 
     # 格式化数值列
@@ -145,14 +128,6 @@ def get_column_config():
         "2023欠款": st.column_config.NumberColumn("2023欠款", format="¥%.2f", min_value=0),
         "2024欠款": st.column_config.NumberColumn("2024欠款", format="¥%.2f", min_value=0),
         "2025欠款": st.column_config.NumberColumn("2025欠款", format="¥%.2f", min_value=0, help="当前年度最新欠款金额"),
-        "23-24变化": st.column_config.NumberColumn("23-24变化", format="¥%.2f"),
-        "24-25变化": st.column_config.NumberColumn("24-25变化", format="¥%.2f"),
-        "23-25总变化": st.column_config.NumberColumn("总变化趋势", format="¥%.2f", help="两年内的总欠款变化趋势"),
-        "坏账风险": st.column_config.TextColumn("坏账风险", help="系统自动计算的风险评级", width="medium"),
-        "客户价值等级": st.column_config.TextColumn("客户价值等级", width="medium"),
-        "客户类型": st.column_config.TextColumn("客户类型", width="medium"),
-        "详细分类": st.column_config.TextColumn("详细分类", width="medium"),
-        "所属部门": st.column_config.TextColumn("所属部门", width="small"),
         "总销售额": st.column_config.NumberColumn("总销售额", format="¥%.2f"),
         "总销售量": st.column_config.NumberColumn("总销售量", format="%d"),
         "欠销比": st.column_config.NumberColumn("欠销比", format="%.1f%%", help="欠款占销售额的比例"),
@@ -163,6 +138,7 @@ def get_column_config():
         "最后销售日期": st.column_config.DateColumn("最后销售日期", format="YYYY-MM-DD"),
         "交易次数": st.column_config.NumberColumn("交易次数", format="%d"),
         "产品种类数": st.column_config.NumberColumn("产品种类", format="%d"),
+        "所属部门": st.column_config.TextColumn("所属部门", width="small"),
     }
     return config
 
@@ -178,25 +154,6 @@ def render_sidebar_legend():
                     f'<div style="background-color: {bg}; color: {fg}; padding: 4px 8px; '
                     f'border-radius: 4px; margin-bottom: 4px; font-size: 0.9em; border: 1px solid {fg}30;">'
                     f'<b>{risk}</b></div>', 
-                    unsafe_allow_html=True
-                )
-        
-        with st.expander("🏆 客户价值颜色", expanded=False):
-            for val, bg in VALUE_COLORS.items():
-                st.markdown(
-                    f'<div style="background-color: {bg}; color: #333; padding: 4px 8px; '
-                    f'border-radius: 4px; margin-bottom: 4px; font-size: 0.9em;">'
-                    f'{val}</div>', 
-                    unsafe_allow_html=True
-                )
-        
-        with st.expander("🎯 综合等级颜色", expanded=False):
-            for val, bg in INTEGRATED_COLORS.items():
-                text_color = '#FFFFFF' if val in ['A-优质大客户', 'A-优质活跃客户', 'D1-高风险持续欠款', 'D2-高风险欠款', 'E-纯欠款客户'] else '#333333'
-                st.markdown(
-                    f'<div style="background-color: {bg}; color: {text_color}; padding: 4px 8px; '
-                    f'border-radius: 4px; margin-bottom: 4px; font-size: 0.8em; font-weight: 500;">'
-                    f'{val}</div>', 
                     unsafe_allow_html=True
                 )
         
@@ -223,18 +180,32 @@ def format_currency(value):
     else:
         return f"¥{value:.2f}"
 
+def get_integrated_data(integration_service, year=25):
+    """获取综合分析数据 - 统一获取函数"""
+    try:
+        print(f"开始获取综合数据，年份: {year}")
+        integrated_df = integration_service.get_integrated_customer_analysis(year)
+        
+        return integrated_df
+    except Exception as e:
+        st.error(f"获取综合数据失败: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return pd.DataFrame()
+
 # -----------------------------------------------------------------------------
-# 3. 页面渲染逻辑
+# 3. 数据导入页面 (已更新为统一欠款表)
 # -----------------------------------------------------------------------------
 
 def render_data_import_tab(debt_service):
-    """数据导入页面"""
+    """数据导入页面 - 更新为统一欠款表"""
     st.header("📥 数据导入中心")
     st.caption("请上传符合格式的 Excel 文件以更新系统数据。")
 
     col1, col2 = st.columns(2)
 
-    def handle_upload(column, title, key_prefix, dept_type, import_func):
+    def handle_upload(column, title, key_prefix, dept_type):
+        """处理文件上传和导入 - 更新为统一欠款表"""
         with column:
             with st.container(border=True):
                 st.subheader(f"{title}")
@@ -274,6 +245,7 @@ def render_data_import_tab(debt_service):
                             column_config={
                                 "finance_id": "财务编号",
                                 "customer_name": "客户名称",
+                                "department": "所属部门",
                                 "debt_2023": st.column_config.NumberColumn("2023欠款", format="¥%.2f"),
                                 "debt_2024": st.column_config.NumberColumn("2024欠款", format="¥%.2f"),
                                 "debt_2025": st.column_config.NumberColumn("2025欠款", format="¥%.2f"),
@@ -282,10 +254,11 @@ def render_data_import_tab(debt_service):
                             width='stretch'
                         )
                         
-                        # 导入按钮
+                        # 导入按钮 - 使用统一的导入函数
                         if st.button(f"🚀 确认导入{dept_type}数据", key=f"{key_prefix}_btn", type="primary", width='stretch'):
                             with st.spinner(f"正在导入{dept_type}数据..."):
-                                success_count, error_count = import_func(df_clean)
+                                # 调用统一导入函数
+                                success_count, error_count = debt_service.import_debt_data(df_clean, dept_type)
                                 
                                 if error_count == 0:
                                     st.success(f"✅ 导入成功！新增/更新 {success_count} 条记录")
@@ -306,8 +279,8 @@ def render_data_import_tab(debt_service):
                         st.error(f"❌ 处理失败: {str(e)}")
                         st.exception(e)
 
-    handle_upload(col1, "🏛️ 古建部门", "dept1", "古建", debt_service.import_department1_debt)
-    handle_upload(col2, "🏺 陶瓷部门", "dept2", "陶瓷", debt_service.import_department2_debt)
+    handle_upload(col1, "🏛️ 古建部门", "dept1", "古建")
+    handle_upload(col2, "🏺 陶瓷部门", "dept2", "陶瓷")
 
     # 数据模板说明
     with st.expander("📝 查看数据格式要求", expanded=False):
@@ -333,7 +306,7 @@ def render_data_import_tab(debt_service):
         
         # 示例数据
         st.markdown("### 示例数据格式：")
-        sample_df = get_sample_data()
+        sample_df = get_sample_data("古建")
         st.dataframe(sample_df, hide_index=True, width='stretch')
         
         # 提供模板下载
@@ -346,31 +319,58 @@ def render_data_import_tab(debt_service):
             help="下载标准格式的数据模板"
         )
 
-def render_analysis_view(df, title, icon):
-    """
-    单部门分析视图
-    """
-    if df.empty:
-        st.warning(f"📭 暂无{title}数据，请先前往「数据导入」页面上传文件。")
-        
-        # 提供快速跳转
-        if st.button(f"🚀 前往{title}数据导入", key=f"goto_{title}"):
-            st.switch_page("7_💳_客户欠款.py#数据导入")
-        return
+# -----------------------------------------------------------------------------
+# 4. 单部门分析视图 (基于综合分析数据)
+# -----------------------------------------------------------------------------
 
-    st.markdown(f"### {icon} {title}部门概览")
+def render_department_analysis(integration_service, department_name, icon):
+    """
+    单部门分析视图 - 基于综合分析数据
+    """
+    # 获取综合分析数据
+    with st.spinner(f"正在获取{department_name}部门数据..."):
+        try:
+            integrated_df = get_integrated_data(integration_service)
+            
+            if integrated_df.empty:
+                st.warning(f"📭 暂无{department_name}部门数据，请先导入销售数据和欠款数据。")
+                return
+            
+            # 筛选特定部门 - 修复：正确处理部门筛选
+            if '所属部门' in integrated_df.columns:
+                # 筛选指定部门的记录
+                dept_mask = integrated_df['所属部门'] == department_name
+                dept_df = integrated_df[dept_mask].copy()
+                
+                # 去除重复的财务编号（同一个财务编号在同一个部门不应该有多条记录）
+                if not dept_df.empty:
+                    duplicate_mask = dept_df.duplicated(['财务编号'], keep='first')
+                    if duplicate_mask.any():
+                        print(f"发现 {duplicate_mask.sum()} 条重复记录，已自动清理")
+                        dept_df = dept_df[~duplicate_mask].reset_index(drop=True)
+            else:
+                st.warning(f"❌ 数据中未找到部门信息列")
+                return
+            
+            if dept_df.empty:
+                st.warning(f"📭 暂无{department_name}部门数据")
+                return
+                
+        except Exception as e:
+            st.error(f"❌ 获取部门数据失败: {str(e)}")
+            return
+
+    st.markdown(f"### {icon} {department_name}部门综合概览")
     
-    # --- 计算单部门指标 ---
-    total_2025 = df['2025欠款'].sum()
-    total_2024 = df['2024欠款'].sum() if '2024欠款' in df.columns else 0
-    change_val = total_2025 - total_2024
-    change_percent = (change_val / total_2024 * 100) if total_2024 > 0 else 0
+    # --- 计算部门指标 ---
+    total_customers = len(dept_df)
+    total_debt_2025 = dept_df['2025欠款'].sum() if '2025欠款' in dept_df.columns else 0
+    total_sales = dept_df['总销售额'].sum() if '总销售额' in dept_df.columns else 0
     
-    # 统计各类客户
-    high_risk_keywords = ['中风险坏账', '高风险坏账']
-    high_risk_count = len(df[df['坏账风险'].isin(high_risk_keywords)])
-    premium_count = len(df[df['客户价值等级'] == 'A级-优质客户'])
-    no_debt_count = len(df[df['2025欠款'] == 0])
+    # 统计风险客户
+    high_risk_customers = len(dept_df[dept_df['风险等级'].isin(['高风险', '较高风险'])]) if '风险等级' in dept_df.columns else 0
+    premium_customers = len(dept_df[dept_df['客户综合等级'].str.startswith('A-')]) if '客户综合等级' in dept_df.columns else 0
+    active_customers = len(dept_df[dept_df['销售活跃度'].isin(['活跃(30天内)', '一般活跃(90天内)'])]) if '销售活跃度' in dept_df.columns else 0
     
     # --- 顶部 KPI 卡片 ---
     col1, col2, col3, col4 = st.columns(4)
@@ -378,34 +378,35 @@ def render_analysis_view(df, title, icon):
     with col1:
         st.metric(
             "总客户数",
-            f"{len(df):,}",
-            "位客户",
-            help=f"{title}部门总客户数"
+            f"{total_customers:,}",
+            help=f"{department_name}部门总客户数"
         )
     
     with col2:
+        debt_sales_ratio = (total_debt_2025 / total_sales * 100) if total_sales > 0 else 0
         st.metric(
             "2025欠款总额",
-            format_currency(total_2025),
-            f"{change_percent:+.1f}%",
+            format_currency(total_debt_2025),
+            f"欠销比: {debt_sales_ratio:.1f}%",
             delta_color="inverse",
-            help="当前年度总欠款及同比变化"
+            help="当前年度总欠款及欠销比例"
         )
     
     with col3:
+        high_risk_ratio = (high_risk_customers / total_customers * 100) if total_customers > 0 else 0
         st.metric(
-            "需关注客户",
-            f"{high_risk_count:,}",
-            f"{high_risk_count/len(df)*100:.1f}%",
+            "风险客户",
+            f"{high_risk_customers:,}",
+            f"{high_risk_ratio:.1f}%",
             delta_color="inverse",
-            help="中高风险坏账客户数量"
+            help="高风险和较高风险客户数量"
         )
     
     with col4:
         st.metric(
             "优质客户",
-            f"{premium_count:,}",
-            f"{no_debt_count}位无欠款",
+            f"{premium_customers:,}",
+            f"{active_customers}位活跃",
             help="A级优质客户数量"
         )
 
@@ -414,56 +415,43 @@ def render_analysis_view(df, title, icon):
     # --- 图表分析区 ---
     st.subheader("📊 数据分析")
     
-    tab_chart1, tab_chart2, tab_chart3 = st.columns(3)
+    tab_chart1, tab_chart2 = st.columns(2)
     
     with tab_chart1:
-        if '坏账风险' in df.columns:
-            risk_counts = df['坏账风险'].value_counts()
-            fig_risk = px.pie(
-                values=risk_counts.values,
-                names=risk_counts.index,
-                title="客户风险分布",
+        if '风险等级' in dept_df.columns:
+            risk_counts = dept_df['风险等级'].value_counts()
+            # 按风险等级排序
+            risk_order = ['低风险', '较低风险', '中等风险', '较高风险', '高风险']
+            risk_counts = risk_counts.reindex(risk_order, fill_value=0)
+            
+            fig_risk = px.bar(
+                x=risk_counts.index,
+                y=risk_counts.values,
+                title="客户风险等级分布",
+                labels={'x': '风险等级', 'y': '客户数量'},
+                text=risk_counts.values,
                 color=risk_counts.index,
                 color_discrete_map=RISK_COLORS
             )
-            fig_risk.update_traces(textposition='inside', textinfo='percent+label')
             fig_risk.update_layout(
-                showlegend=True,
-                margin=dict(t=50, b=20, l=20, r=20)
-            )
-            st.plotly_chart(fig_risk, width='stretch')
-        else:
-            st.info("暂无风险分类数据")
-    
-    with tab_chart2:
-        if '客户类型' in df.columns:
-            type_counts = df['客户类型'].value_counts()
-            fig_type = px.bar(
-                x=type_counts.index,
-                y=type_counts.values,
-                title="客户类型分布",
-                color=type_counts.index,
-                labels={'x': '客户类型', 'y': '客户数量'},
-                text=type_counts.values
-            )
-            fig_type.update_layout(
-                xaxis_title="客户类型",
+                xaxis_title="风险等级",
                 yaxis_title="客户数量",
+                height=400,
                 showlegend=False
             )
-            fig_type.update_traces(texttemplate='%{text}', textposition='outside')
-            st.plotly_chart(fig_type, width='stretch')
+            fig_risk.update_traces(texttemplate='%{text}', textposition='outside')
+            st.plotly_chart(fig_risk, use_container_width=True)
     
-    with tab_chart3:
+    with tab_chart2:
         # 欠款金额分布
-        if '2025欠款' in df.columns:
+        if '2025欠款' in dept_df.columns:
             # 按欠款金额分组
-            df_copy = df.copy()
-            df_copy['欠款区间'] = pd.cut(df_copy['2025欠款'], 
-                                       bins=[0, 1000, 5000, 10000, 50000, float('inf')],
-                                       labels=['0-1千', '1千-5千', '5千-1万', '1万-5万', '5万以上'])
+            dept_df_copy = dept_df.copy()
+            bins = [0, 1000, 5000, 10000, 50000, float('inf')]
+            labels = ['0-1千', '1千-5千', '5千-1万', '1万-5万', '5万以上']
+            dept_df_copy['欠款区间'] = pd.cut(dept_df_copy['2025欠款'], bins=bins, labels=labels)
             
-            debt_group = df_copy['欠款区间'].value_counts().sort_index()
+            debt_group = dept_df_copy['欠款区间'].value_counts().sort_index()
             fig_debt = px.bar(
                 x=debt_group.index,
                 y=debt_group.values,
@@ -476,87 +464,73 @@ def render_analysis_view(df, title, icon):
             fig_debt.update_layout(
                 xaxis_title="欠款区间 (元)",
                 yaxis_title="客户数量",
-                showlegend=False
+                showlegend=False,
+                height=400
             )
             fig_debt.update_traces(texttemplate='%{text}', textposition='outside')
-            st.plotly_chart(fig_debt, width='stretch')
+            st.plotly_chart(fig_debt, use_container_width=True)
 
     # --- 详细数据查询区 ---
     st.subheader("🔍 详细数据查询")
     
     with st.container(border=True):
         # 筛选器
-        col_filter1, col_filter2, col_filter3, col_filter4 = st.columns([2, 2, 2, 1])
+        col_filter1, col_filter2, col_filter3 = st.columns([3, 2, 1])
         
         with col_filter1:
             search_term = st.text_input(
                 "🔍 搜索客户",
-                placeholder="输入名称或编号...",
-                key=f"search_{title}",
+                placeholder="输入名称或财务编号...",
+                key=f"search_{department_name}",
                 help="支持客户名称和财务编号搜索"
             )
         
         with col_filter2:
-            if '坏账风险' in df.columns:
-                risk_options = ['全部'] + list(df['坏账风险'].unique())
+            if '风险等级' in dept_df.columns:
+                risk_options = ['全部'] + list(dept_df['风险等级'].unique())
                 risk_selected = st.multiselect(
                     "风险等级",
                     options=risk_options,
                     default=['全部'],
-                    key=f"risk_{title}"
+                    key=f"risk_{department_name}"
                 )
                 if '全部' in risk_selected:
-                    risk_filter = df['坏账风险'].unique()
+                    risk_filter = dept_df['风险等级'].unique()
                 else:
                     risk_filter = risk_selected
         
         with col_filter3:
-            if '客户价值等级' in df.columns:
-                value_options = ['全部'] + list(df['客户价值等级'].unique())
-                value_selected = st.multiselect(
-                    "价值等级",
-                    options=value_options,
-                    default=['全部'],
-                    key=f"value_{title}"
-                )
-                if '全部' in value_selected:
-                    value_filter = df['客户价值等级'].unique()
-                else:
-                    value_filter = value_selected
-        
-        with col_filter4:
             st.write("")  # 占位
             st.write("")  # 占位
-            show_colors = st.toggle("🎨 颜色高亮", value=True, key=f"colors_{title}")
+            show_colors = st.toggle("🎨 颜色高亮", value=True, key=f"colors_{department_name}")
 
     # 应用筛选
-    df_filtered = df.copy()
+    df_filtered = dept_df.copy()
     
     if search_term:
         mask = (
             df_filtered['客户名称'].str.contains(search_term, case=False, na=False) |
-            df_filtered['客户代码'].astype(str).str.contains(search_term, case=False, na=False)
+            df_filtered['财务编号'].astype(str).str.contains(search_term, case=False, na=False)
         )
         df_filtered = df_filtered[mask]
     
-    if '坏账风险' in df.columns and 'risk_filter' in locals():
-        df_filtered = df_filtered[df_filtered['坏账风险'].isin(risk_filter)]
-    
-    if '客户价值等级' in df.columns and 'value_filter' in locals():
-        df_filtered = df_filtered[df_filtered['客户价值等级'].isin(value_filter)]
+    if '风险等级' in dept_df.columns and 'risk_filter' in locals():
+        df_filtered = df_filtered[df_filtered['风险等级'].isin(risk_filter)]
     
     # 选择显示列
     display_columns = [
-        '客户代码', '客户名称', '2023欠款', '2024欠款', '2025欠款',
-        '23-24变化', '24-25变化', '23-25总变化', '坏账风险', '客户价值等级'
+        '财务编号', '客户名称', '总销售额', '2025欠款', '欠销比',
+        '销售活跃度', '客户综合等级', '风险评分', '风险等级'
     ]
+    
+    # 确保列存在
     display_columns = [col for col in display_columns if col in df_filtered.columns]
     
     # 应用样式
     styled_df = apply_style(
         df_filtered[display_columns],
-        highlight_risk=show_colors,
-        highlight_value=show_colors
+        highlight_integrated=show_colors,
+        highlight_score=show_colors
     )
     
     # 显示数据
@@ -571,55 +545,57 @@ def render_analysis_view(df, title, icon):
     # 底部统计信息
     col_info1, col_info2, col_info3 = st.columns(3)
     with col_info1:
-        st.caption(f"📊 显示 {len(df_filtered)} / {len(df)} 条记录")
+        st.caption(f"📊 显示 {len(df_filtered)} / {len(dept_df)} 条记录")
     with col_info2:
-        if not df_filtered.empty:
+        if not df_filtered.empty and '2025欠款' in df_filtered.columns:
             total_filtered_debt = df_filtered['2025欠款'].sum()
             st.caption(f"💰 筛选欠款总额: {format_currency(total_filtered_debt)}")
     with col_info3:
-        if not df_filtered.empty and '坏账风险' in df_filtered.columns:
-            high_risk_filtered = len(df_filtered[df_filtered['坏账风险'].isin(high_risk_keywords)])
-            st.caption(f"⚠️ 高风险客户: {high_risk_filtered} 位")
+        if not df_filtered.empty and '总销售额' in df_filtered.columns:
+            total_filtered_sales = df_filtered['总销售额'].sum()
+            st.caption(f"💼 筛选销售额: {format_currency(total_filtered_sales)}")
 
-def render_comprehensive_tab(debt_service):
+# -----------------------------------------------------------------------------
+# 5. 综合部门分析视图
+# -----------------------------------------------------------------------------
+
+def render_comprehensive_tab(integration_service):
     """
-    综合部门分析视图
+    综合部门分析视图 - 基于综合分析数据
     """
-    # 获取数据
-    df1 = debt_service.get_department1_debt()
-    df2 = debt_service.get_department2_debt()
+    # 获取综合分析数据
+    with st.spinner("正在获取综合数据..."):
+        integrated_df = get_integrated_data(integration_service)
+        
+        if integrated_df.empty:
+            st.warning("📭 暂无综合数据，请先导入销售数据和欠款数据。")
+            return
 
-    if df1.empty and df2.empty:
-        st.warning("📭 暂无数据，请先导入数据。")
-        return
-
-    # 分析数据 - 只在合并前分析一次
-    if not df1.empty:
-        df1_analyzed = debt_service.analyze_debt_data(df1)
-        df1_analyzed['所属部门'] = '古建'
-    else:
-        df1_analyzed = pd.DataFrame()
-    
-    if not df2.empty:
-        df2_analyzed = debt_service.analyze_debt_data(df2)
-        df2_analyzed['所属部门'] = '陶瓷'
-    else:
-        df2_analyzed = pd.DataFrame()
-
-    # 合并数据 - 只在最后合并一次
-    df_all = pd.concat([df1_analyzed, df2_analyzed], ignore_index=True)
-    
-    if df_all.empty:
-        st.warning("📭 合并后无数据")
-        return
-
-    st.header("📈 全公司欠款综合看板")
+    st.header("📈 全公司综合看板")
     
     # --- 计算全公司指标 ---
-    total_2025 = df_all['2025欠款'].sum()
-    total_2024 = df_all['2024欠款'].sum() if '2024欠款' in df_all.columns else 0
-    total_change = total_2025 - total_2024
-    change_percent = (total_change / total_2024 * 100) if total_2024 > 0 else 0
+    # 按部门统计记录数
+    if '所属部门' in integrated_df.columns:
+        dept_counts = integrated_df.groupby('所属部门').size()
+        dept1_count = dept_counts.get('古建', 0)
+        dept2_count = dept_counts.get('陶瓷', 0)
+    else:
+        dept1_count = dept2_count = 0
+    
+    # 计算总客户数（按财务编号去重）
+    total_unique_customers = integrated_df['财务编号'].nunique() if '财务编号' in integrated_df.columns else 0
+    
+    total_debt_2025 = integrated_df['2025欠款'].sum() if '2025欠款' in integrated_df.columns else 0
+    total_sales = integrated_df['总销售额'].sum() if '总销售额' in integrated_df.columns else 0
+    
+    # 统计风险客户
+    high_risk_customers = 0
+    if '风险等级' in integrated_df.columns:
+        high_risk_customers = len(integrated_df[integrated_df['风险等级'].isin(['高风险', '较高风险'])])
+    
+    premium_customers = 0
+    if '客户综合等级' in integrated_df.columns:
+        premium_customers = len(integrated_df[integrated_df['客户综合等级'].str.startswith('A-')])
 
     # 顶部 KPI
     k1, k2, k3, k4 = st.columns(4)
@@ -627,35 +603,36 @@ def render_comprehensive_tab(debt_service):
     with k1:
         st.metric(
             "全公司客户数",
-            f"{len(df_all):,}",
-            f"古建:{len(df1)} 陶瓷:{len(df2)}",
-            help="全公司总客户数及部门分布"
+            f"{total_unique_customers}",
+            f"古建:{dept1_count}条 陶瓷:{dept2_count}条",
+            help="按财务编号去重的客户数及部门分布"
         )
     
     with k2:
+        debt_sales_ratio = (total_debt_2025 / total_sales * 100) if total_sales > 0 else 0
         st.metric(
             "2025总欠款",
-            format_currency(total_2025),
-            f"{change_percent:+.1f}%",
+            format_currency(total_debt_2025),
+            f"欠销比: {debt_sales_ratio:.1f}%",
             delta_color="inverse",
-            help="全公司总欠款及同比变化"
+            help="全公司总欠款及欠销比例"
         )
     
     with k3:
-        high_risk_all = df_all[df_all['坏账风险'] == '高风险坏账']
-        high_risk_count = len(high_risk_all)
-        high_risk_percent = (high_risk_count / len(df_all) * 100) if len(df_all) > 0 else 0
+        high_risk_percent = (high_risk_customers / len(integrated_df) * 100) if len(integrated_df) > 0 else 0
         st.metric(
-            "高风险坏账客户",
-            f"{high_risk_count:,}",
+            "风险客户",
+            f"{high_risk_customers:,}",
             f"{high_risk_percent:.1f}%",
             delta_color="inverse",
-            help="高风险坏账客户数量及占比"
+            help="高风险和较高风险客户数量"
         )
     
     with k4:
-        if not df_all.empty:
-            top_debtor = df_all.loc[df_all['2025欠款'].idxmax()]
+        if not integrated_df.empty and '2025欠款' in integrated_df.columns:
+            # 找出欠款最多的客户
+            max_debt_idx = integrated_df['2025欠款'].idxmax()
+            top_debtor = integrated_df.loc[max_debt_idx]
             top_debtor_name = top_debtor['客户名称'][:15] + "..." if len(top_debtor['客户名称']) > 15 else top_debtor['客户名称']
             st.metric(
                 "最大欠款客户",
@@ -665,49 +642,6 @@ def render_comprehensive_tab(debt_service):
             )
 
     st.divider()
-
-    # --- 部门对比分析 ---
-    st.subheader("🏢 部门对比分析")
-    
-    col_chart1, col_chart2 = st.columns(2)
-    
-    with col_chart1:
-        # 部门欠款对比
-        if '所属部门' in df_all.columns:
-            dept_debt = df_all.groupby('所属部门')['2025欠款'].sum().reset_index()
-            fig_dept = px.bar(
-                dept_debt,
-                x='所属部门',
-                y='2025欠款',
-                title="部门欠款总额对比",
-                text=[format_currency(x) for x in dept_debt['2025欠款']],
-                color='所属部门',
-                color_discrete_sequence=['#1f77b4', '#ff7f0e']
-            )
-            fig_dept.update_layout(
-                xaxis_title="部门",
-                yaxis_title="欠款总额 (¥)",
-                height=350
-            )
-            fig_dept.update_traces(textposition='outside')
-            st.plotly_chart(fig_dept, width='stretch')
-    
-    with col_chart2:
-        # 部门客户数对比
-        if '所属部门' in df_all.columns:
-            dept_counts = df_all['所属部门'].value_counts().reset_index()
-            dept_counts.columns = ['所属部门', '客户数']
-            fig_counts = px.pie(
-                dept_counts,
-                values='客户数',
-                names='所属部门',
-                title="部门客户数分布",
-                color='所属部门',
-                color_discrete_sequence=['#1f77b4', '#ff7f0e']
-            )
-            fig_counts.update_traces(textposition='inside', textinfo='percent+label')
-            fig_counts.update_layout(height=350)
-            st.plotly_chart(fig_counts, width='stretch')
 
     # --- 全局数据检索 ---
     st.subheader("🌐 全局数据检索")
@@ -731,40 +665,38 @@ def render_comprehensive_tab(debt_service):
             )
         
         with col_search3:
-            if '坏账风险' in df_all.columns:
+            if '风险等级' in integrated_df.columns:
                 risk_filter_all = st.multiselect(
                     "风险等级",
-                    df_all['坏账风险'].unique(),
+                    integrated_df['风险等级'].unique(),
                     placeholder="选择风险等级"
                 )
 
     # 应用筛选
-    df_view = df_all.copy()
+    df_view = integrated_df.copy()
     
     if all_search:
         mask = (
             df_view['客户名称'].str.contains(all_search, case=False, na=False) |
-            df_view['客户代码'].astype(str).str.contains(all_search, case=False, na=False)
+            df_view['财务编号'].astype(str).str.contains(all_search, case=False, na=False)
         )
         df_view = df_view[mask]
     
     if dept_filter:
         df_view = df_view[df_view['所属部门'].isin(dept_filter)]
     
-    if '坏账风险' in df_all.columns and risk_filter_all:
-        df_view = df_view[df_view['坏账风险'].isin(risk_filter_all)]
+    if '风险等级' in integrated_df.columns and risk_filter_all:
+        df_view = df_view[df_view['风险等级'].isin(risk_filter_all)]
 
     # 显示列配置
-    display_cols = ['所属部门', '客户代码', '客户名称', '2025欠款', '23-25总变化', '坏账风险', '客户价值等级']
+    display_cols = ['所属部门', '财务编号', '客户名称', '总销售额', '2025欠款', '欠销比', '销售活跃度', '客户综合等级', '风险等级']
     display_cols = [col for col in display_cols if col in df_view.columns]
     
     # 应用样式
-    styled_view = apply_style(df_view[display_cols])
+    styled_view = apply_style(df_view[display_cols], highlight_integrated=True)
     
     # 显示数据
     config = get_column_config()
-    config["所属部门"] = st.column_config.TextColumn("部门", width="small")
-    
     st.dataframe(
         styled_view,
         column_config=config,
@@ -773,6 +705,19 @@ def render_comprehensive_tab(debt_service):
         hide_index=True
     )
     
+    # 底部统计信息
+    col_info1, col_info2, col_info3 = st.columns(3)
+    with col_info1:
+        st.caption(f"📊 显示 {len(df_view)} / {len(df_view)} 条记录")
+    with col_info2:
+        if not df_view.empty and '2025欠款' in df_view.columns:
+            total_filtered_debt = df_view['2025欠款'].sum()
+            st.caption(f"💰 筛选欠款总额: {format_currency(total_filtered_debt)}")
+    with col_info3:
+        if not df_view.empty and '总销售额' in df_view.columns:
+            total_filtered_sales = df_view['总销售额'].sum()
+            st.caption(f"💼 筛选销售额: {format_currency(total_filtered_sales)}")
+
     # 导出按钮
     if not df_view.empty:
         csv = df_view[display_cols].to_csv(index=False).encode('utf-8-sig')
@@ -783,6 +728,10 @@ def render_comprehensive_tab(debt_service):
             mime="text/csv",
             width='stretch'
         )
+
+# -----------------------------------------------------------------------------
+# 6. 销售欠款综合分析
+# -----------------------------------------------------------------------------
 
 def render_integrated_analysis_tab(integration_service):
     """销售欠款综合分析页面"""
@@ -837,24 +786,20 @@ def render_integrated_analysis_tab(integration_service):
             # 应用销售额筛选
             if min_sales > 0 and '总销售额' in integrated_df.columns:
                 integrated_df = integrated_df[integrated_df['总销售额'] >= min_sales]
-
+            
+            # 检查数据质量
             if not integrated_df.empty:
-                # 确保财务编号是字符串类型
-                if '财务编号' in integrated_df.columns:
-                    integrated_df['财务编号'] = integrated_df['财务编号'].astype(str)
+                # 检查是否有重复的财务编号+部门组合
+                dup_check = integrated_df.duplicated(subset=['财务编号', '所属部门'], keep=False)
+                if dup_check.any():
+                    st.warning(f"⚠️ 发现 {dup_check.sum()} 条重复记录，已自动清理")
+                    integrated_df = integrated_df.drop_duplicates(subset=['财务编号', '所属部门'], keep='first')
                 
-                # 检查并清理重复数据
-                dup_check_cols = []
-                if '财务编号' in integrated_df.columns:
-                    dup_check_cols.append('财务编号')
-                if '所属部门' in integrated_df.columns:
-                    dup_check_cols.append('所属部门')
-                
-                if dup_check_cols:
-                    duplicate_mask = integrated_df.duplicated(subset=dup_check_cols, keep='first')
-                    if duplicate_mask.any():
-                        st.warning(f"⚠️ 发现 {duplicate_mask.sum()} 条重复记录，已自动清理")
-                        integrated_df = integrated_df[~duplicate_mask].reset_index(drop=True)
+                # 检查同一个财务编号是否有不同部门的记录
+                finance_id_counts = integrated_df.groupby('财务编号')['所属部门'].nunique()
+                multi_dept_ids = finance_id_counts[finance_id_counts > 1].index.tolist()
+                if multi_dept_ids:
+                    st.info(f"📊 {len(multi_dept_ids)} 个客户在两个部门都有记录")
             
         except Exception as e:
             st.error(f"❌ 数据获取失败: {str(e)}")
@@ -880,7 +825,7 @@ def render_integrated_analysis_tab(integration_service):
         st.metric(
             "总客户数",
             f"{total_customers:,}",
-            help="包含销售和欠款数据的客户总数"
+            help=""
         )
     
     with kpi2:
@@ -940,149 +885,117 @@ def render_integrated_analysis_tab(integration_service):
     # --- 分析图表 ---
     st.subheader("📈 客户分布分析")
     
-    tab_chart1, tab_chart2, tab_chart3, tab_chart4 = st.tabs(["等级分布", "风险分布", "部门对比", "欠销关系"])
+    tab_chart1, tab_chart2 = st.tabs(["客户分布总略", "多维度分析"])
     
     with tab_chart1:
-        if '客户综合等级' in integrated_df.columns:
-            level_counts = integrated_df['客户综合等级'].value_counts().reset_index()
-            level_counts.columns = ['客户综合等级', '客户数']
-            
-            fig_level = px.bar(
-                level_counts,
-                x='客户综合等级',
-                y='客户数',
-                title="客户综合等级分布",
-                color='客户综合等级',
-                color_discrete_map=INTEGRATED_COLORS,
-                text='客户数'
-            )
-            fig_level.update_layout(
-                xaxis_title="综合等级",
-                yaxis_title="客户数量",
-                height=400,
-                showlegend=False
-            )
-            fig_level.update_traces(textposition='outside')
-            st.plotly_chart(fig_level, width='stretch')
-    
+        coltab_1,coltab_2 = st.columns(2)
+        with coltab_1:
+            if '风险等级' in integrated_df.columns:
+                risk_counts = integrated_df['风险等级'].value_counts().reset_index()
+                risk_counts.columns = ['风险等级', '客户数']
+                
+                # 按风险等级排序
+                risk_order = ['低风险', '较低风险', '中等风险', '较高风险', '高风险']
+                risk_counts['风险等级'] = pd.Categorical(risk_counts['风险等级'], categories=risk_order, ordered=True)
+                risk_counts = risk_counts.sort_values('风险等级')
+                
+                fig_risk = px.bar(
+                    risk_counts,
+                    x='风险等级',
+                    y='客户数',
+                    title="客户风险等级分布",
+                    color='风险等级',
+                    color_discrete_map=RISK_COLORS,
+                    text='客户数'
+                )
+                fig_risk.update_layout(
+                    xaxis_title="风险等级",
+                    yaxis_title="客户数量",
+                    height=400,
+                    showlegend=False
+                )
+                fig_risk.update_traces(textposition='outside')
+                st.plotly_chart(fig_risk, width='stretch')
+
+        with coltab_2:
+            if '客户综合等级' in integrated_df.columns:
+                level_counts = integrated_df['客户综合等级'].value_counts().reset_index()
+                level_counts.columns = ['客户综合等级', '客户数']
+                
+                fig_level = px.bar(
+                    level_counts,
+                    x='客户综合等级',
+                    y='客户数',
+                    title="客户综合等级分布",
+                    text='客户数'
+                )
+                fig_level.update_layout(
+                    xaxis_title="综合等级",
+                    yaxis_title="客户数量",
+                    height=400,
+                    showlegend=False
+                )
+                fig_level.update_traces(textposition='outside')
+                st.plotly_chart(fig_level, width='stretch')
+                
     with tab_chart2:
-        if '风险等级' in integrated_df.columns:
-            risk_counts = integrated_df['风险等级'].value_counts().reset_index()
-            risk_counts.columns = ['风险等级', '客户数']
-            
-            fig_risk = px.pie(
-                risk_counts,
-                values='客户数',
-                names='风险等级',
-                title="客户风险等级分布",
-                color='风险等级',
-                color_discrete_map={
-                    '低风险': '#4CAF50',
-                    '较低风险': '#8BC34A',
-                    '中等风险': '#FFC107',
-                    '较高风险': '#FF9800',
-                    '高风险': '#F44336'
-                }
-            )
-            fig_risk.update_traces(textposition='inside', textinfo='percent+label')
-            fig_risk.update_layout(height=400)
-            st.plotly_chart(fig_risk, width='stretch')
+        coltab_3,coltab_4 = st.columns(2)
+        with coltab_3:
+            if '所属部门' in integrated_df.columns and '风险等级' in integrated_df.columns:
+                dept_risk = pd.crosstab(integrated_df['所属部门'], integrated_df['风险等级'])
+                
+                fig_heat = px.imshow(
+                    dept_risk,
+                    title="部门风险分布热力图",
+                    text_auto=True,
+                    color_continuous_scale='OrRd',
+                    labels=dict(x="风险等级", y="部门", color="客户数"),
+                    aspect="auto"
+                )
+                fig_heat.update_layout(height=400)
+                st.plotly_chart(fig_heat, width='stretch')
     
-    with tab_chart3:
-        if '所属部门' in integrated_df.columns and '风险等级' in integrated_df.columns:
-            dept_risk = pd.crosstab(integrated_df['所属部门'], integrated_df['风险等级'])
-            
-            fig_heat = px.imshow(
-                dept_risk,
-                title="部门风险分布热力图",
-                text_auto=True,
-                color_continuous_scale='OrRd',
-                labels=dict(x="风险等级", y="部门", color="客户数"),
-                aspect="auto"
-            )
-            fig_heat.update_layout(height=400)
-            st.plotly_chart(fig_heat, width='stretch')
-    
-    with tab_chart4:
-        if '总销售额' in integrated_df.columns and '2025欠款' in integrated_df.columns:
-            # 复制数据用于散点图
-            scatter_df = integrated_df.copy()
-            
-            # 过滤掉异常数据：销售额<=0或欠款为负值
-            scatter_df = scatter_df[
-                (scatter_df['总销售额'] > 0) & 
-                (scatter_df['2025欠款'] >= 0)
-            ]
-            
-            if not scatter_df.empty:
-                # 计算欠销比，确保非负
-                scatter_df['欠销比'] = scatter_df.apply(
-                    lambda row: max(0, (row['2025欠款'] / row['总销售额'] * 100)) 
-                    if row['总销售额'] > 0 else 0,
-                    axis=1
-                )
-                
-                # 对欠销比进行归一化处理，用于散点大小
-                # 避免太大或太小的值
-                if scatter_df['欠销比'].max() > 0:
-                    max_debt_ratio = scatter_df['欠销比'].max()
-                    scatter_df['size_scaled'] = scatter_df['欠销比'].apply(
-                        lambda x: max(5, min(50, (x / max_debt_ratio) * 30 + 5))
-                    )
-                else:
-                    scatter_df['size_scaled'] = 10
-                
-                # 创建散点图
-                fig_scatter = px.scatter(
-                    scatter_df,
-                    x='总销售额',
-                    y='2025欠款',
-                    size='size_scaled',
-                    color='客户综合等级' if '客户综合等级' in scatter_df.columns else None,
-                    hover_data=['客户名称', '财务编号', '欠销比'],
-                    title="销售额 vs 欠款额 散点图",
-                    color_discrete_map=INTEGRATED_COLORS,
-                    log_x=True if scatter_df['总销售额'].min() > 0 else False,
-                    log_y=True if scatter_df['2025欠款'].min() > 0 else False
-                )
-                
-                fig_scatter.update_layout(
-                    xaxis_title="总销售额 (元)",
-                    yaxis_title="2025欠款 (元)",
-                    height=400
-                )
-                
-                # 添加趋势线（仅当有足够数据点时）
-                if len(scatter_df) > 1:
-                    try:
-                        # 计算线性回归
-                        from sklearn.linear_model import LinearRegression
-                        import numpy as np
+        with coltab_4:
+                if '总销售额' in integrated_df.columns and '2025欠款' in integrated_df.columns:
+                    # 复制数据用于散点图
+                    scatter_df = integrated_df.copy()
+                    
+                    # 过滤掉异常数据：销售额<=0或欠款为负值
+                    scatter_df = scatter_df[
+                        (scatter_df['总销售额'] > 0) & 
+                        (scatter_df['2025欠款'] >= 0)
+                    ]
+                    
+                    if not scatter_df.empty:
+                        # 计算欠销比
+                        scatter_df['欠销比'] = scatter_df.apply(
+                            lambda row: (row['2025欠款'] / row['总销售额'] * 100) 
+                            if row['总销售额'] > 0 else 0,
+                            axis=1
+                        )
                         
-                        X = scatter_df['总销售额'].values.reshape(-1, 1)
-                        y = scatter_df['2025欠款'].values
+                        # 创建散点图
+                        fig_scatter = px.scatter(
+                            scatter_df,
+                            x='总销售额',
+                            y='2025欠款',
+                            size='欠销比',
+                            color='客户综合等级',
+                            hover_data=['客户名称', '财务编号', '欠销比'],
+                            title="销售额 vs 欠款额",
+                            log_x=True if scatter_df['总销售额'].min() > 0 else False,
+                            log_y=True if scatter_df['2025欠款'].min() > 0 else False
+                        )
                         
-                        model = LinearRegression()
-                        model.fit(X, y)
+                        fig_scatter.update_layout(
+                            xaxis_title="总销售额 (元)",
+                            yaxis_title="2025欠款 (元)",
+                            height=400
+                        )
                         
-                        # 生成预测线
-                        x_range = np.linspace(X.min(), X.max(), 100).reshape(-1, 1)
-                        y_pred = model.predict(x_range)
-                        
-                        fig_scatter.add_trace(go.Scatter(
-                            x=x_range.flatten(),
-                            y=y_pred,
-                            mode='lines',
-                            name='趋势线',
-                            line=dict(color='red', width=2, dash='dash'),
-                            showlegend=True
-                        ))
-                    except:
-                        pass  # 如果无法计算趋势线，跳过
-                
-                st.plotly_chart(fig_scatter, width='stretch')
-            else:
-                st.info("📊 暂无有效的销售欠款数据用于散点图分析")
+                        st.plotly_chart(fig_scatter, width='stretch')
+                    else:
+                        st.info("📊 暂无有效的销售欠款数据用于散点图分析")
     
     # --- 详细数据表格 ---
     st.subheader("🔍 客户明细数据")
@@ -1168,7 +1081,7 @@ def render_integrated_analysis_tab(integration_service):
             display_df['欠销比'] = display_df['欠销比'].apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else "0.0%")
         
         # 应用样式
-        styled_df = apply_style(display_df, highlight_risk=False, highlight_value=False, highlight_integrated=show_colors)
+        styled_df = apply_style(display_df, highlight_integrated=show_colors, highlight_score=show_colors)
         
         # 显示数据
         st.dataframe(
@@ -1203,168 +1116,193 @@ def render_integrated_analysis_tab(integration_service):
                 width='stretch'
             )
 
+# -----------------------------------------------------------------------------
+# 7. 客户详情视图 - 已更新使用统一欠款表
+# -----------------------------------------------------------------------------
+
 def render_customer_detail_view(integration_service):
     """客户详情分析视图"""
     st.header("👤 客户详情分析")
     st.caption("查看单个客户的详细销售和欠款记录")
     
-    # 财务编号输入
-    col_input, col_example = st.columns([2, 1])
+    # 搜索区域
+    col_search, col_help = st.columns([3, 1])
     
-    with col_input:
-        """采用客户名称 避免编号重叠"""
-        customer_name = st.text_input(
-            "请输入客户名称",
-            placeholder="例如：岳阳招罗甘威",
-            key="customer_name_input",
-            help="输入客户名称（支持模糊匹配）"
+    with col_search:
+        search_term = st.text_input(
+            "请输入财务编号或客户名称",
+            placeholder="例如：15、413-116、东湖熊峰",
+            key="customer_search_input",
+            help="支持财务编号精确匹配和客户名称关键词匹配"
         )
     
-    with col_example:
-        st.caption("📋 示例客户名称:")
-        st.caption("• 岳阳招罗甘威")
-        st.caption("• 永州永州市陈跃军")
-        st.caption("• 鑫帅辉-九方昌盛")
+    with col_help:
+        st.caption("📋 搜索说明：")
+        st.caption("• 15 (财务编号-精确匹配)")
+        st.caption("• 413-116 (财务编号-精确匹配)")
+        st.caption("• 东湖熊峰 (客户名称-关键词匹配)")
+        st.caption("• 熊峰 (客户名称-包含匹配)")
     
-    if customer_name:
-        with st.spinner("🔍 正在获取客户详情..."):
+    if search_term:
+        with st.spinner("🔍 正在搜索客户数据..."):
             try:
-                customer_detail = integration_service.get_customer_detail(customer_name)
+                customer_detail = integration_service.get_customer_detail(search_term)
                 
                 if customer_detail['sales_records'].empty and customer_detail['debt_records'].empty:
-                    st.warning(f"❌ 未找到名称为 '{customer_name}' 的客户数据")
+                    st.warning(f"❌ 未找到客户 '{search_term}' 的相关记录")
                     return
                 
-                # 客户概览
-                st.subheader(f"📋 客户概览 - {customer_name}")
+                # 显示匹配信息
+                # if customer_detail.get('matched_customer_names'):
+                #     matched_names = customer_detail['matched_customer_names']
+                #     if len(matched_names) > 1:
+                #         st.info(f"🔍 匹配到 {len(matched_names)} 个相关客户")
+                #         for i, name in enumerate(matched_names, 1):
+                #             st.write(f"{i}. {name}")
+                #     else:
+                #         st.info(f"🔍 匹配客户：{matched_names[0]}")
                 
+                # 获取客户名称用于显示（如果有多个，显示第一个）
+                display_name = customer_detail.get('matched_customer_names', [search_term])[0] if customer_detail.get('matched_customer_names') else search_term
+                
+                st.markdown(f"### 📋 客户概览 - {display_name}")
+                
+                # 显示关键指标
                 col_overview1, col_overview2, col_overview3, col_overview4 = st.columns(4)
                 
                 with col_overview1:
-                    st.metric("总销售额", f"¥{customer_detail['total_sales']:,.2f}")
+                    st.metric(
+                        "总销售额",
+                        f"¥{customer_detail['total_sales']:,.2f}",
+                        help="该客户所有交易的总销售额"
+                    )
                 
                 with col_overview2:
-                    st.metric("2025年交易", customer_detail['recent_transactions'], "次")
+                    st.metric(
+                        "2025年交易",
+                        customer_detail['recent_transactions'],
+                        "次交易",
+                        help="2025年交易次数"
+                    )
                 
                 with col_overview3:
                     if not customer_detail['debt_records'].empty:
                         total_debt = customer_detail['debt_records']['debt_2025'].sum()
                         st.metric("当前欠款", f"¥{total_debt:,.2f}")
+                    else:
+                        st.metric("当前欠款", "¥0.00", "无欠款记录")
                 
                 with col_overview4:
                     if not customer_detail['sales_records'].empty:
                         unique_products = customer_detail['sales_records']['product_name'].nunique()
-                        st.metric("产品种类", unique_products, "种")
+                        st.metric("产品种类", unique_products, "种产品")
+                    else:
+                        st.metric("产品种类", 0, "无销售记录")
+                
+                # 显示财务编号信息
+                if customer_detail.get('finance_ids'):
+                    st.info(f"📊 相关财务编号: {', '.join(map(str, customer_detail['finance_ids']))}")
                 
                 st.divider()
                 
-                # 销售记录
+                # 销售记录部分
                 if not customer_detail['sales_records'].empty:
                     st.subheader("📈 销售记录明细")
                     
-                    # 销售统计
-                    col_sales1, col_sales2, col_sales3 = st.columns(3)
+                    sales_df = customer_detail['sales_records']
                     
-                    with col_sales1:
-                        avg_amount = customer_detail['sales_records']['amount'].mean()
-                        st.metric("平均交易额", f"¥{avg_amount:,.2f}")
+                    # 统计信息
+                    col_stats1, col_stats2, col_stats3 = st.columns(3)
                     
-                    with col_sales2:
-                        max_amount = customer_detail['sales_records']['amount'].max()
-                        st.metric("最大交易额", f"¥{max_amount:,.2f}")
+                    with col_stats1:
+                        total_records = len(sales_df)
+                        st.metric("总交易笔数", total_records)
                     
-                    with col_sales3:
-                        recent_date = customer_detail['sales_records'].iloc[0][['year', 'month', 'day']]
-                        st.metric("最近交易", f"{recent_date['year']}-{recent_date['month']:02d}-{recent_date['day']:02d}")
+                    with col_stats2:
+                        if not sales_df.empty:
+                            # 按财务编号统计
+                            unique_finance_ids = sales_df['finance_id'].nunique()
+                            st.metric("户头数量", unique_finance_ids)
                     
-                    # 销售数据表格
+                    with col_stats3:
+                        if not sales_df.empty and 'record_date' in sales_df.columns:
+                            try:
+                                recent_sales = sales_df.sort_values('record_date', ascending=False).iloc[0]
+                                recent_date = recent_sales['record_date'].strftime('%Y-%m-%d') if hasattr(recent_sales['record_date'], 'strftime') else str(recent_sales['record_date'])
+                                st.metric("最近交易", recent_date)
+                            except:
+                                st.metric("最近交易", "未知")
+                    
+                    # 显示数据表格
                     st.dataframe(
-                        customer_detail['sales_records'],
+                        sales_df,
                         column_config={
-                            "year": st.column_config.NumberColumn("年", format="%d"),
-                            "month": st.column_config.NumberColumn("月", format="%d"),
-                            "day": st.column_config.NumberColumn("日", format="%d"),
-                            "product_name": st.column_config.TextColumn("产品名称"),
-                            "color": st.column_config.TextColumn("颜色"),
-                            "grade": st.column_config.TextColumn("等级"),
-                            "quantity": st.column_config.NumberColumn("数量", format="%d"),
-                            "unit_price": st.column_config.NumberColumn("单价", format="¥%.2f"),
-                            "amount": st.column_config.NumberColumn("金额", format="¥%.2f"),
-                            "ticket_number": st.column_config.TextColumn("单据号"),
-                            "production_line": st.column_config.TextColumn("生产线")
+                            "year": st.column_config.NumberColumn("年", format="%d", width="small"),
+                            "month": st.column_config.NumberColumn("月", format="%d", width="small"),
+                            "day": st.column_config.NumberColumn("日", format="%d", width="small"),
+                            "customer_name": st.column_config.TextColumn("客户名称", width="medium"),
+                            "finance_id": st.column_config.TextColumn("财务编号", width="small"),
+                            "sub_customer_name": st.column_config.TextColumn("子客户", width="medium"),
+                            "product_name": st.column_config.TextColumn("产品名称", width="medium"),
+                            "color": st.column_config.TextColumn("颜色", width="small"),
+                            "grade": st.column_config.TextColumn("等级", width="small"),
+                            "quantity": st.column_config.NumberColumn("数量", format="%d", width="small"),
+                            "unit_price": st.column_config.NumberColumn("单价", format="¥%.2f", width="small"),
+                            "amount": st.column_config.NumberColumn("金额", format="¥%.2f", width="small"),
+                            "ticket_number": st.column_config.TextColumn("单据号", width="small"),
+                            "production_line": st.column_config.TextColumn("生产线", width="small"),
+                            "record_date": st.column_config.DateColumn("记录日期", format="YYYY-MM-DD")
                         },
                         hide_index=True,
-                        width='stretch'
+                        height=400
                     )
+                    
+                    st.caption(f"📊 共 {len(sales_df)} 条销售记录")
                 else:
                     st.info("📭 暂无销售记录")
                 
-                # 欠款记录
+                # 欠款记录部分
                 if not customer_detail['debt_records'].empty:
                     st.subheader("💰 欠款记录明细")
                     
-                    # 欠款趋势图
                     debt_data = customer_detail['debt_records']
-                    if len(debt_data) > 0:
-                        # 汇总各部门欠款
-                        debt_summary = debt_data[['debt_2023', 'debt_2024', 'debt_2025']].sum()
-                        
-                        col_debt1, col_debt2 = st.columns([2, 1])
-                        
-                        with col_debt1:
-                            fig_debt = go.Figure()
-                            fig_debt.add_trace(go.Bar(
-                                x=['2023', '2024', '2025'],
-                                y=debt_summary.values,
-                                name='欠款金额',
-                                marker_color='#e74c3c',
-                                text=[f'¥{x:,.0f}' for x in debt_summary.values],
-                                textposition='outside'
-                            ))
-                            fig_debt.update_layout(
-                                title="欠款趋势变化",
-                                xaxis_title="年份",
-                                yaxis_title="欠款金额 (¥)",
-                                height=300,
-                                showlegend=False
-                            )
-                            st.plotly_chart(fig_debt, width='stretch')
-                        
-                        with col_debt2:
-                            # 欠款部门分布
-                            if 'department' in debt_data.columns:
-                                dept_debt = debt_data.groupby('department')['debt_2025'].sum()
-                                fig_dept = go.Figure(data=[go.Pie(
-                                    labels=dept_debt.index,
-                                    values=dept_debt.values,
-                                    hole=.3,
-                                    marker_colors=['#3498db', '#e74c3c']
-                                )])
-                                fig_dept.update_layout(
-                                    title="部门欠款分布",
-                                    height=300,
-                                    showlegend=True
-                                )
-                                st.plotly_chart(fig_dept, width='stretch')
                     
-                    # 欠款数据表格
-                    st.dataframe(
-                        debt_data,
-                        column_config={
-                            "department": st.column_config.TextColumn("部门"),
-                            "customer_name": st.column_config.TextColumn("客户名称"),
-                            "debt_2023": st.column_config.NumberColumn("2023欠款", format="¥%.2f"),
-                            "debt_2024": st.column_config.NumberColumn("2024欠款", format="¥%.2f"),
-                            "debt_2025": st.column_config.NumberColumn("2025欠款", format="¥%.2f")
-                        },
-                        hide_index=True,
-                        width='stretch'
-                    )
+                    # 统计信息
+                    col_debt1, col_debt2 = st.columns(2)
+                    
+                    with col_debt1:
+                        total_debt_2025 = debt_data['debt_2025'].sum()
+                        st.metric("2025总欠款", f"¥{total_debt_2025:,.2f}")
+                    
+                    with col_debt2:
+                        unique_departments = debt_data['department'].nunique()
+                        st.metric("涉及部门", unique_departments)
+                    
+                    # 按部门显示欠款
+                    for dept in debt_data['department'].unique():
+                        dept_data = debt_data[debt_data['department'] == dept]
+                        st.markdown(f"**{dept}部门欠款**")
+                        
+                        st.dataframe(
+                            dept_data,
+                            column_config={
+                                "department": st.column_config.TextColumn("部门", width="small"),
+                                "customer_name": st.column_config.TextColumn("客户名称", width="medium"),
+                                "finance_id": st.column_config.TextColumn("财务编号", width="small"),
+                                "debt_2023": st.column_config.NumberColumn("2023欠款", format="¥%.2f", width="medium"),
+                                "debt_2024": st.column_config.NumberColumn("2024欠款", format="¥%.2f", width="medium"),
+                                "debt_2025": st.column_config.NumberColumn("2025欠款", format="¥%.2f", width="medium")
+                            },
+                            hide_index=True
+                        )
                 else:
                     st.info("💰 暂无欠款记录")
                 
-                # 导出按钮
+                # 导出功能
                 if not customer_detail['sales_records'].empty or not customer_detail['debt_records'].empty:
+                    st.divider()
+                    st.subheader("📤 数据导出")
+                    
                     col_export1, col_export2 = st.columns(2)
                     
                     with col_export1:
@@ -1373,9 +1311,9 @@ def render_customer_detail_view(integration_service):
                             st.download_button(
                                 label="📥 导出销售记录",
                                 data=sales_csv,
-                                file_name=f"{customer_name}_销售记录_{datetime.now().strftime('%Y%m%d')}.csv",
+                                file_name=f"{display_name}_销售记录_{datetime.now().strftime('%Y%m%d')}.csv",
                                 mime="text/csv",
-                                width='stretch'
+                                help="导出该客户的所有销售记录"
                             )
                     
                     with col_export2:
@@ -1384,13 +1322,19 @@ def render_customer_detail_view(integration_service):
                             st.download_button(
                                 label="📥 导出欠款记录",
                                 data=debt_csv,
-                                file_name=f"{customer_name}_欠款记录_{datetime.now().strftime('%Y%m%d')}.csv",
+                                file_name=f"{display_name}_欠款记录_{datetime.now().strftime('%Y%m%d')}.csv",
                                 mime="text/csv",
-                                width='stretch'
+                                help="导出该客户的所有欠款记录"
                             )
-            
+                
             except Exception as e:
                 st.error(f"❌ 获取客户详情失败: {str(e)}")
+                import traceback
+                st.error(traceback.format_exc())
+
+# -----------------------------------------------------------------------------
+# 8. 分类说明页面
+# -----------------------------------------------------------------------------
 
 def render_classification_help_tab():
     """分类标准说明页面"""
@@ -1407,32 +1351,7 @@ def render_classification_help_tab():
         
         with col_logic1:
             st.markdown("""
-            ### 📊 基础欠款分类
-            
-            **优质客户(无欠款)**
-            - 三年欠款均为0的客户
-            - 最优质的客户群体
-            
-            **已结清客户**
-            - 从有欠款变为0的客户
-            - 还款意愿良好的客户
-            
-            **新增欠款客户**
-            - 从0变为有欠款的客户
-            - 需要关注的新增风险
-            
-            **持续欠款客户**
-            - 三年都有欠款的客户
-            - 重点关注对象
-            
-            **波动客户**
-            - 其他欠款变化情况的客户
-            - 需要具体分析的客户
-            """)
-        
-        with col_logic2:
-            st.markdown("""
-            ### 🎯 综合信用分类
+            ### 🏆 综合信用分类
             
             **A级客户 (优质)**
             - A-优质大客户：无欠款 + 高销售额 + 活跃
@@ -1441,18 +1360,61 @@ def render_classification_help_tab():
             **B级客户 (良好)**
             - B-大额休眠客户：无欠款 + 高销售额 + 休眠
             - B-一般客户：无欠款 + 低销售额
-            - B1/B2-低风险欠款：欠销比<20%
+            - B1-低风险活跃欠款：欠销比<20% + 活跃
+            - B2-低风险欠款：欠销比<20% + 不活跃
             
             **C级客户 (关注)**
             - C-小额客户：无欠款 + 无销售或极少销售
-            - C1/C2-中风险欠款：欠销比20%-50%
+            - C1-中风险持续欠款：欠销比20%-50% + 持续欠款
+            - C2-中风险欠款：欠销比20%-50%
             
             **D级客户 (风险)**
             - D-无销售无欠款：无任何业务往来
-            - D1/D2-高风险欠款：欠销比>50%
+            - D1-高风险持续欠款：欠销比>50% + 持续欠款
+            - D2-高风险欠款：欠销比>50%
             
             **E级客户 (高危)**
             - E-纯欠款客户：有欠款但无销售
+            """)
+        
+        with col_logic2:
+            st.markdown("""
+            ### 📊 风险等级说明
+            
+            **低风险**
+            - 风险评分80-100分
+            - A级优质客户
+            
+            **较低风险**
+            - 风险评分60-79分
+            - B级良好客户
+            
+            **中等风险**
+            - 风险评分40-59分
+            - C级关注客户
+            
+            **较高风险**
+            - 风险评分20-39分
+            - D级风险客户
+            
+            **高风险**
+            - 风险评分0-19分
+            - E级高危客户
+            
+            ### 📈 风险评分规则
+            
+            **评分范围：0-100分**
+            - **80-100分**：低风险，信用优秀
+            - **60-79分**：较低风险，信用良好
+            - **40-59分**：中等风险，需要关注
+            - **20-39分**：较高风险，需要控制
+            - **0-19分**：高风险，急需处理
+            
+            **评分因素权重：**
+            1. 欠款金额（权重40%）
+            2. 欠销比例（权重25%）
+            3. 销售活跃度（权重20%）
+            4. 持续欠款情况（权重15%）
             """)
     
     with tab_advice:
@@ -1460,7 +1422,7 @@ def render_classification_help_tab():
         
         advice_data = [
             {
-                "等级": "A级客户",
+                "风险等级": "低风险",
                 "特征": "无欠款、高价值、活跃",
                 "管理策略": "VIP重点维护",
                 "具体措施": "优先供货、价格优惠、定期拜访、新品推荐",
@@ -1468,7 +1430,7 @@ def render_classification_help_tab():
                 "信用政策": "可提高信用额度"
             },
             {
-                "等级": "B级客户",
+                "风险等级": "较低风险",
                 "特征": "低欠款、有销售、一般活跃",
                 "管理策略": "正常维护",
                 "具体措施": "标准账期、定期对账、保持沟通",
@@ -1476,24 +1438,24 @@ def render_classification_help_tab():
                 "信用政策": "维持现有政策"
             },
             {
-                "等级": "C级客户",
-                "特征": "中等欠款、欠销比较高",
+                "风险等级": "中等风险",
+                "特征": "中等欠款、欠销比适中",
                 "管理策略": "重点关注",
                 "具体措施": "缩短账期、关注欠款变化、了解经营状况",
                 "催款频率": "月度跟进",
                 "信用政策": "适度收紧"
             },
             {
-                "等级": "D级客户",
-                "特征": "高欠款、高风险",
+                "风险等级": "较高风险",
+                "特征": "高欠款、欠销比高",
                 "管理策略": "风险控制",
                 "具体措施": "停止赊销、预付款要求、专人跟进催收",
                 "催款频率": "每周跟进",
                 "信用政策": "现款现货"
             },
             {
-                "等级": "E级客户",
-                "特征": "纯欠款、无销售",
+                "风险等级": "高风险",
+                "特征": "纯欠款、无销售或长期欠款",
                 "管理策略": "法律介入",
                 "具体措施": "发律师函、准备诉讼、资产保全",
                 "催款频率": "立即处理",
@@ -1502,23 +1464,6 @@ def render_classification_help_tab():
         ]
         
         st.table(pd.DataFrame(advice_data))
-        
-        st.markdown("""
-        ### 📋 风险评分说明
-        
-        **评分范围：0-100分**
-        - **80-100分**：低风险，信用优秀
-        - **60-79分**：较低风险，信用良好
-        - **40-59分**：中等风险，需要关注
-        - **20-39分**：较高风险，需要控制
-        - **0-19分**：高风险，急需处理
-        
-        **评分因素：**
-        1. 欠款金额（权重40%）
-        2. 欠销比例（权重25%）
-        3. 销售活跃度（权重20%）
-        4. 持续欠款情况（权重15%）
-        """)
     
     with tab_colors:
         st.subheader("🎨 系统颜色图例")
@@ -1534,19 +1479,7 @@ def render_classification_help_tab():
                     f'border-radius: 6px; margin-bottom: 6px; font-size: 1em; border: 1px solid {fg}50; '
                     f'display: flex; justify-content: space-between; align-items: center;">'
                     f'<span><b>{risk}</b></span>'
-                    f'<span style="font-size: 0.9em; color: {fg};">对应文本颜色</span>'
-                    f'</div>', 
-                    unsafe_allow_html=True
-                )
-        
-        with col_color2:
-            st.markdown("##### 综合等级颜色")
-            for value, bg in INTEGRATED_COLORS.items():
-                text_color = '#FFFFFF' if value in ['A-优质大客户', 'A-优质活跃客户', 'D1-高风险持续欠款', 'D2-高风险欠款', 'E-纯欠款客户'] else '#333333'
-                st.markdown(
-                    f'<div style="background-color: {bg}; color: {text_color}; padding: 8px 12px; '
-                    f'border-radius: 6px; margin-bottom: 6px; font-size: 1em; font-weight: 500;">'
-                    f'{value}'
+                    f'<span style="font-size: 0.9em; color: {fg};">风险等级</span>'
                     f'</div>', 
                     unsafe_allow_html=True
                 )
@@ -1575,7 +1508,7 @@ def render_classification_help_tab():
                 )
 
 # -----------------------------------------------------------------------------
-# 6. 主程序入口
+# 9. 主程序入口
 # -----------------------------------------------------------------------------
 
 def main():
@@ -1615,25 +1548,19 @@ def main():
     
     with tab2:
         try:
-            df = debt_service.get_department1_debt()
-            if not df.empty:
-                df = debt_service.analyze_debt_data(df)
-            render_analysis_view(df, "古建", "🏛️")
+            render_department_analysis(integration_service, "古建", "🏛️")
         except Exception as e:
             st.error(f"❌ 古建数据分析失败: {str(e)}")
     
     with tab3:
         try:
-            df = debt_service.get_department2_debt()
-            if not df.empty:
-                df = debt_service.analyze_debt_data(df)
-            render_analysis_view(df, "陶瓷", "🏺")
+            render_department_analysis(integration_service, "陶瓷", "🏺")
         except Exception as e:
             st.error(f"❌ 陶瓷数据分析失败: {str(e)}")
     
     with tab4:
         try:
-            render_comprehensive_tab(debt_service)
+            render_comprehensive_tab(integration_service)
         except Exception as e:
             st.error(f"❌ 综合分析失败: {str(e)}")
     

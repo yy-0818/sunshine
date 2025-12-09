@@ -1,6 +1,6 @@
 import sqlite3
 import os
-import pandas as pd  # 添加这行
+import pandas as pd
 from contextlib import contextmanager
 import logging
 import hashlib
@@ -104,32 +104,19 @@ def init_database():
                 FOREIGN KEY (sales_record_id) REFERENCES sales_records (id)
             )
             ''',
-            # 古建欠款表
+            # 统一欠款表（合并古建和陶瓷）- 使用中文列名
             '''
-            CREATE TABLE IF NOT EXISTS department1_debt (
+            CREATE TABLE IF NOT EXISTS unified_debt (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                finance_id TEXT NOT NULL,  -- 新增：统一格式的代码
+                finance_id TEXT NOT NULL,
                 customer_name TEXT NOT NULL,
+                department TEXT NOT NULL,  -- '古建' 或 '陶瓷'
                 debt_2023 REAL DEFAULT 0,
                 debt_2024 REAL DEFAULT 0,
                 debt_2025 REAL DEFAULT 0,
                 created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(finance_id)
-            )
-            ''',
-            # 陶瓷欠款表
-            '''
-            CREATE TABLE IF NOT EXISTS department2_debt (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                finance_id TEXT NOT NULL,  -- 新增：统一格式的代码
-                customer_name TEXT NOT NULL,
-                debt_2023 REAL DEFAULT 0,
-                debt_2024 REAL DEFAULT 0,
-                debt_2025 REAL DEFAULT 0,
-                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(finance_id)
+                UNIQUE(finance_id, department)
             )
             ''',
             # 用户表（用于账号管理）
@@ -165,12 +152,12 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_sales_customer_product ON sales_records(finance_id, sub_customer_name, color, grade, record_date)',
             'CREATE INDEX IF NOT EXISTS idx_sales_date_composite ON sales_records(year, month, day)',
             'CREATE INDEX IF NOT EXISTS idx_customer_finance ON customers(finance_id)',
-            # 修正：移除分号，使用逗号
             'CREATE INDEX IF NOT EXISTS idx_production_line ON sales_records(production_line)',
             'CREATE INDEX IF NOT EXISTS idx_production_line_date ON sales_records(production_line, record_date)',
             # 欠款数据索引
-            # 'CREATE INDEX IF NOT EXISTS idx_dept1_customer_code ON department1_debt(customer_code)',
-            # 'CREATE INDEX IF NOT EXISTS idx_dept2_customer_code ON department2_debt(customer_code)',
+            'CREATE INDEX IF NOT EXISTS idx_debt_finance_id ON unified_debt(finance_id)',
+            'CREATE INDEX IF NOT EXISTS idx_debt_department ON unified_debt(department)',
+            'CREATE INDEX IF NOT EXISTS idx_debt_finance_department ON unified_debt(finance_id, department)',
             # 账号索引
             'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
             'CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)'
@@ -183,7 +170,7 @@ def init_database():
             except Exception as e:
                 logger.error(f"创建索引 {i+1} 时出错: {e}")
         
-        # 优化表结构检查
+        # 检查并添加必要的列
         _check_and_alter_tables(cursor)
         # 创建默认用户
         _create_default_users(cursor)
@@ -198,7 +185,6 @@ def _check_and_alter_tables(cursor):
         ('customers', 'phone', 'TEXT'),
         ('sales_records', 'product_name', 'TEXT'),
         ('sales_records', 'ticket_number', 'TEXT'),
-        # 添加新表的列检查（如果需要）
         ('users', 'department', 'TEXT'),
         ('users', 'last_login', 'TIMESTAMP')
     ]
@@ -212,6 +198,14 @@ def _check_and_alter_tables(cursor):
                 logger.debug(f"列 {table}.{column} 已存在")
             else:
                 logger.warning(f"列 {table}.{column} 添加失败: {e}")
+    
+    # 检查是否需要删除旧表
+    try:
+        cursor.execute("DROP TABLE IF EXISTS department1_debt")
+        cursor.execute("DROP TABLE IF EXISTS department2_debt")
+        logger.info("已删除旧的部门欠款表")
+    except Exception as e:
+        logger.warning(f"删除旧表失败: {e}")
 
 def _create_default_users(cursor):
     """创建默认用户"""
@@ -234,10 +228,7 @@ def _create_default_users(cursor):
             logger.debug(f"用户 {username} 已存在或创建失败: {e}")
 
 def get_database_status(days_threshold=30):
-    """获取数据库状态，统一统计关键指标
-    Args:
-        days_threshold: 活跃客户的时间阈值（天），默认30天内有过交易的客户为活跃客户
-    """
+    """获取数据库状态，统一统计关键指标"""
     status = {}
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -251,10 +242,6 @@ def get_database_status(days_threshold=30):
         total_sales = cursor.fetchone()[0]
         status['total_sales'] = total_sales if total_sales else 0
 
-        # 价格变更记录数量
-        cursor.execute("SELECT COUNT(*) FROM price_change_history")
-        status['price_change_history_count'] = cursor.fetchone()[0]
-
         # 数据库大小
         try:
             db_size = os.path.getsize("ceramic_prices.db") / 1024 / 1024
@@ -262,108 +249,30 @@ def get_database_status(days_threshold=30):
             db_size = 0
         status['db_size_mb'] = round(db_size, 2)
 
-        # 总客户or子客户数（唯一 customer_name, finance_id, sub_customer_name）
-        cursor.execute("""
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT customer_name, finance_id, sub_customer_name
-                FROM customers
-                WHERE customer_name IS NOT NULL 
-                    AND finance_id IS NOT NULL 
-                    AND sub_customer_name IS NOT NULL
-            ) AS unique_customers
-        """)
-        status['sub_customers'] = cursor.fetchone()[0]
-
-        # 主客户数（唯一 customer_name,finance_id）
-        cursor.execute("""
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT customer_name, finance_id
-                FROM customers
-                WHERE customer_name IS NOT NULL
-                    AND finance_id IS NOT NULL
-            ) AS unique_customers
-        """)
-        status['main_customers'] = cursor.fetchone()[0]
-
-        # 产品颜色数
-        cursor.execute("SELECT COUNT(DISTINCT color) FROM sales_records")
-        status['unique_colors'] = cursor.fetchone()[0]
-
-        # 产品数
-        cursor.execute("SELECT COUNT(DISTINCT product_name) FROM sales_records")
-        status['unique_products'] = cursor.fetchone()[0]
-
-        # ================== 基于子客户的活跃客户统计 ==================
+        # 统一欠款统计
+        cursor.execute("SELECT COUNT(*) FROM unified_debt")
+        status['debt_count'] = cursor.fetchone()[0]
         
-        # 最近N天内的活跃子客户数 - 使用子查询方式
+        cursor.execute("SELECT SUM(debt_2025) FROM unified_debt")
+        total_debt = cursor.fetchone()[0]
+        status['total_debt'] = total_debt if total_debt else 0
+        
+        # 按部门统计欠款
         cursor.execute("""
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT customer_name, finance_id, sub_customer_name
-                FROM sales_records 
-                WHERE record_date >= date('now', ?)
-            )
-        """, (f'-{days_threshold} days',))
-        status['active_sub_customers_recent'] = cursor.fetchone()[0]
-
-        # 本月活跃子客户数
-        cursor.execute("""
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT customer_name, finance_id, sub_customer_name
-                FROM sales_records 
-                WHERE strftime('%Y-%m', record_date) = strftime('%Y-%m', 'now')
-            )
+            SELECT 
+                department,
+                COUNT(*) as count,
+                SUM(debt_2025) as total_debt
+            FROM unified_debt
+            GROUP BY department
         """)
-        status['active_sub_customers_this_month'] = cursor.fetchone()[0]
-
-        # 上月活跃子客户数
-        cursor.execute("""
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT customer_name, finance_id, sub_customer_name
-                FROM sales_records 
-                WHERE strftime('%Y-%m', record_date) = strftime('%Y-%m', 'now', '-1 month')
-            )
-        """)
-        status['active_sub_customers_last_month'] = cursor.fetchone()[0]
-
-        # 年度活跃子客户数
-        cursor.execute("""
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT customer_name, finance_id, sub_customer_name
-                FROM sales_records 
-                WHERE strftime('%Y', record_date) = strftime('%Y', 'now')
-            )
-        """)
-        status['active_sub_customers_this_year'] = cursor.fetchone()[0]
-
-        # 计算活跃率
-        total_sub_customers = status['sub_customers']
-        if total_sub_customers > 0:
-            status['active_sub_customers_rate_recent'] = round(status['active_sub_customers_recent'] / total_sub_customers * 100, 2)
-            status['active_sub_customers_rate_this_month'] = round(status['active_sub_customers_this_month'] / total_sub_customers * 100, 2)
-        else:
-            status['active_sub_customers_rate_recent'] = 0
-            status['active_sub_customers_rate_this_month'] = 0
-
-        # ================== 新增：欠款数据统计 ==================
-        # 古建欠款统计
-        cursor.execute("SELECT COUNT(*) FROM department1_debt")
-        status['dept1_debt_count'] = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT SUM(debt_2025) FROM department1_debt")
-        dept1_total = cursor.fetchone()[0]
-        status['dept1_total_debt'] = dept1_total if dept1_total else 0
-        
-        # 陶瓷欠款统计
-        cursor.execute("SELECT COUNT(*) FROM department2_debt")
-        status['dept2_debt_count'] = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT SUM(debt_2025) FROM department2_debt")
-        dept2_total = cursor.fetchone()[0]
-        status['dept2_total_debt'] = dept2_total if dept2_total else 0
-        
-        # 用户统计
-        cursor.execute("SELECT COUNT(*) FROM users")
-        status['users_count'] = cursor.fetchone()[0]
+        dept_stats = cursor.fetchall()
+        status['department_debt_stats'] = {}
+        for dept, count, total in dept_stats:
+            status['department_debt_stats'][dept] = {
+                'count': count,
+                'total_debt': total if total else 0
+            }
 
     return status
 
@@ -384,8 +293,7 @@ def clear_database():
         cursor.execute('DELETE FROM price_change_history')
         cursor.execute('DELETE FROM sales_records')
         cursor.execute('DELETE FROM customers')
-        cursor.execute('DELETE FROM department1_debt')
-        cursor.execute('DELETE FROM department2_debt')
+        cursor.execute('DELETE FROM unified_debt')
         # 保留users表，但清空非默认用户
         cursor.execute("DELETE FROM users WHERE username NOT IN ('admin', 'manager', 'user')")
         # 重新启用外键约束
@@ -411,6 +319,154 @@ def batch_insert_sales_records(records):
         except Exception as e:
             logger.error(f"批量插入失败: {e}")
             raise
+
+def import_debt_data(df, department):
+    """导入欠款数据到统一欠款表"""
+    success_count = 0
+    error_count = 0
+    
+    if df.empty:
+        return success_count, error_count
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        
+        # 检查表是否存在
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='unified_debt'")
+        if not cursor.fetchone():
+            logger.error("unified_debt表不存在，请先初始化数据库")
+            return 0, len(df)
+        
+        for _, row in df.iterrows():
+            try:
+                # 确保列名正确
+                finance_id = str(row['finance_id']) if 'finance_id' in row else ''
+                customer_name = str(row['customer_name']) if 'customer_name' in row else f"未知客户_{finance_id}"
+                debt_2023 = float(row['debt_2023']) if 'debt_2023' in row and pd.notna(row['debt_2023']) else 0.0
+                debt_2024 = float(row['debt_2024']) if 'debt_2024' in row and pd.notna(row['debt_2024']) else 0.0
+                debt_2025 = float(row['debt_2025']) if 'debt_2025' in row and pd.notna(row['debt_2025']) else 0.0
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO unified_debt 
+                    (finance_id, customer_name, department, debt_2023, debt_2024, debt_2025)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    finance_id,
+                    customer_name,
+                    department,
+                    debt_2023,
+                    debt_2024,
+                    debt_2025
+                ))
+                success_count += 1
+            except Exception as e:
+                error_count += 1
+                logger.error(f"导入欠款数据失败 {finance_id}: {e}")
+    
+    return success_count, error_count
+
+def get_debt_by_department(department=None):
+    """获取欠款数据，可指定部门"""
+    with get_connection() as conn:
+        if department:
+            query = '''
+                SELECT 
+                    finance_id,
+                    customer_name,
+                    department,
+                    debt_2023,
+                    debt_2024,
+                    debt_2025
+                FROM unified_debt
+                WHERE department = ?
+                ORDER BY finance_id
+            '''
+            df = pd.read_sql(query, conn, params=(department,))
+        else:
+            query = '''
+                SELECT 
+                    finance_id,
+                    customer_name,
+                    department,
+                    debt_2023,
+                    debt_2024,
+                    debt_2025
+                FROM unified_debt
+                ORDER BY department, finance_id
+            '''
+            df = pd.read_sql(query, conn)
+        return df
+
+def get_all_debt_data():
+    """获取所有欠款数据"""
+    return get_debt_by_department()
+
+def get_sales_by_finance_id_and_name():
+    """获取销售数据，按财务编号和客户名称分组"""
+    with get_connection() as conn:
+        query = '''
+            SELECT 
+                finance_id,
+                customer_name,
+                SUM(amount) as total_amount,
+                SUM(quantity) as total_quantity,
+                COUNT(DISTINCT product_name) as unique_products,
+                COUNT(*) as transaction_count,
+                MAX(date('20' || substr('00' || year, -2) || '-' || 
+                      substr('00' || month, -2) || '-' || 
+                      substr('00' || day, -2))) as last_sale_date
+            FROM sales_records
+            WHERE finance_id IS NOT NULL AND finance_id != ''
+            GROUP BY finance_id, customer_name
+            ORDER BY finance_id, customer_name
+        '''
+        df = pd.read_sql(query, conn)
+        
+        # 计算活跃度
+        if not df.empty and 'last_sale_date' in df.columns:
+            df['last_sale_date'] = pd.to_datetime(df['last_sale_date'], errors='coerce')
+            current_date = pd.Timestamp.now()
+            df['days_since_last_sale'] = (current_date - df['last_sale_date']).dt.days
+            
+            def classify_activity(days):
+                if pd.isna(days):
+                    return '无销售记录'
+                elif days <= 30:
+                    return '活跃(30天内)'
+                elif days <= 90:
+                    return '一般活跃(90天内)'
+                elif days <= 180:
+                    return '低活跃(180天内)'
+                else:
+                    return '休眠客户'
+            
+            df['销售活跃度'] = df['days_since_last_sale'].apply(classify_activity)
+        
+        return df
+
+def get_all_debt_data():
+    """获取所有欠款数据"""
+    with get_connection() as conn:
+        query = '''
+            SELECT 
+                finance_id,
+                customer_name,
+                department,
+                debt_2023,
+                debt_2024,
+                debt_2025,
+                CASE 
+                    WHEN debt_2023 > 0 AND debt_2024 > 0 AND debt_2025 > 0 THEN '持续欠款'
+                    WHEN debt_2023 = 0 AND debt_2024 = 0 AND debt_2025 > 0 THEN '新增欠款'
+                    WHEN debt_2023 > 0 AND debt_2024 = 0 AND debt_2025 = 0 THEN '已结清'
+                    WHEN debt_2023 = 0 AND debt_2024 = 0 AND debt_2025 = 0 THEN '无欠款'
+                    ELSE '波动欠款'
+                END as debt_trend
+            FROM unified_debt
+            ORDER BY finance_id, department
+        '''
+        df = pd.read_sql(query, conn)
+        return df
 
 # 新增：用户认证相关函数
 def verify_user_credentials(username, password):

@@ -6,6 +6,7 @@ def process_debt_excel_data(df, department_name=""):
     """
     处理欠款Excel数据
     统一财务编号格式：将点(.)替换为短横线(-)
+    返回统一格式的数据，包含部门信息
     """
     data = []
     
@@ -40,6 +41,7 @@ def process_debt_excel_data(df, department_name=""):
             row_data = {
                 'finance_id': finance_id,  # 使用统一格式的财务编号
                 'customer_name': str(df.iloc[i, 1]) if pd.notna(df.iloc[i, 1]) else f"未知客户_{finance_id}",
+                'department': department_name,  # 添加部门信息
                 'debt_2023': debt_2023,
                 'debt_2024': debt_2024,
                 'debt_2025': debt_2025,
@@ -74,6 +76,9 @@ def clean_finance_id(finance_id):
     # 统一格式：将点替换为短横线
     code_str = code_str.replace('.', '-')
     
+    # 确保格式正确：如果有多个短横线，合并为一个
+    code_str = re.sub(r'-+', '-', code_str)
+    
     return code_str
 
 def validate_debt_data(df):
@@ -85,15 +90,18 @@ def validate_debt_data(df):
         return issues
     
     # 检查必要的列
-    required_columns = ['finance_id', 'customer_name', 'debt_2023', 'debt_2024', 'debt_2025']
+    required_columns = ['finance_id', 'customer_name', 'department', 'debt_2023', 'debt_2024', 'debt_2025']
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         issues.append(f"缺少必要的列: {missing_columns}")
     
-    # 检查财务编号唯一性
-    duplicate_ids = df[df.duplicated('finance_id', keep=False)]
-    if not duplicate_ids.empty:
-        issues.append(f"发现重复的财务编号: {duplicate_ids['finance_id'].unique().tolist()}")
+    # 检查财务编号唯一性（在同一部门内）
+    if 'finance_id' in df.columns and 'department' in df.columns:
+        for dept in df['department'].unique():
+            dept_df = df[df['department'] == dept]
+            duplicate_ids = dept_df[dept_df.duplicated('finance_id', keep=False)]
+            if not duplicate_ids.empty:
+                issues.append(f"部门 {dept} 发现重复的财务编号: {duplicate_ids['finance_id'].unique().tolist()}")
     
     # 检查金额数据的有效性
     amount_columns = ['debt_2023', 'debt_2024', 'debt_2025']
@@ -103,9 +111,16 @@ def validate_debt_data(df):
             if not invalid_amounts.empty:
                 issues.append(f"列 {col} 包含非数值数据")
     
+    # 检查部门名称是否有效
+    if 'department' in df.columns:
+        valid_departments = ['古建', '陶瓷']
+        invalid_depts = df[~df['department'].isin(valid_departments)]
+        if not invalid_depts.empty:
+            issues.append(f"发现无效的部门名称: {invalid_depts['department'].unique().tolist()}")
+    
     return issues
 
-def get_sample_data():
+def get_sample_data(department="古建"):
     """获取示例数据格式"""
     sample_data = {
         '客户代码': ['2203.10001', '2203.10002', '220310003'],
@@ -114,4 +129,19 @@ def get_sample_data():
         '2024年欠款金额': [3000.0, 0.0, 12000.0],
         '2025年欠款金额': [0.0, 8000.0, 18000.0]
     }
-    return pd.DataFrame(sample_data)
+    df = pd.DataFrame(sample_data)
+    
+    # 添加处理后的数据示例
+    processed_data = []
+    for i in range(len(df)):
+        finance_id = clean_finance_id(df.iloc[i, 0])
+        processed_data.append({
+            'finance_id': finance_id,
+            'customer_name': df.iloc[i, 1],
+            'department': department,
+            'debt_2023': df.iloc[i, 2],
+            'debt_2024': df.iloc[i, 3],
+            'debt_2025': df.iloc[i, 4]
+        })
+    
+    return pd.DataFrame(processed_data)
