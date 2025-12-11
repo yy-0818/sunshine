@@ -71,6 +71,7 @@ def get_latest_prices():
                 COALESCE(NULLIF(ticket_number, ''), '无票号') AS 票据号,
                 COALESCE(NULLIF(remark, ''), '无备注') AS 备注,
                 production_line AS 生产线,
+                COALESCE(NULLIF(department, ''), '(空)') AS 部门,  -- 新增部门列
                 record_date AS 记录日期
             FROM Latest WHERE rn = 1
             ORDER BY customer_name, color, record_date DESC
@@ -107,6 +108,7 @@ def query_sales_records(filters):
             COALESCE(NULLIF(ticket_number,''), '无票号') AS 票据号,
             COALESCE(NULLIF(remark,''), '无备注') AS 备注,
             COALESCE(NULLIF(production_line,''), '(空)') AS 生产线,
+            COALESCE(NULLIF(department,''), '(空)') AS 部门,  -- 新增部门列
             record_date AS 记录日期
         FROM sales_records
         WHERE 1=1
@@ -141,6 +143,16 @@ def query_sales_records(filters):
                 line_conds.append("production_line=?")
                 params.append(l)
         conditions.append("(" + " OR ".join(line_conds) + ")")
+    
+    if filters['departments']:  # 新增部门筛选条件
+        dept_conds = []
+        for d in filters['departments']:
+            if d == '(空)':
+                dept_conds.append("(department IS NULL OR department='')")
+            else:
+                dept_conds.append("department=?")
+                params.append(d)
+        conditions.append("(" + " OR ".join(dept_conds) + ")")
 
     if filters['start_date'] and filters['end_date']:
         conditions.append("record_date BETWEEN ? AND ?")
@@ -169,6 +181,7 @@ def render_filters():
         color_opts = get_unique_values("color")
         grade_opts = get_unique_values("grade")
         line_opts = get_unique_values("production_line")
+        dept_opts = get_unique_values("department")  # 获取部门选项
         min_date, max_date = get_date_range()
 
         col1, col2, col3 = st.columns([2, 2, 1.5])
@@ -179,21 +192,24 @@ def render_filters():
         with col3:
             grades = st.multiselect("产品等级", grade_opts, placeholder="选择等级（可多选）")
 
-        col4, col5 = st.columns([2, 1])
+        col4, col5, col6 = st.columns(3)
         with col4:
             lines = st.multiselect("生产线", line_opts, placeholder="选择生产线（可多选）")
         with col5:
+            departments = st.multiselect("部门", dept_opts, placeholder="选择部门（可多选）", 
+                                        help="筛选所属部门，如：一期、二期等")  # 新增部门筛选器
+        with col6:
             range_choice = st.selectbox(
                 "时间范围",
                 ["最近30天", "最近90天", "最近半年", "全部时间", "自定义"],
-            )
+        )
+        col7, col8 = st.columns([2, 2])        
         # 计算时间范围
         start_date, end_date = min_date.date(), max_date.date()
         if range_choice == "自定义":
-            col6, col7 = st.columns([2, 2])
-            with col6:
-                start_date = st.date_input("开始日期", min_value=min_date.date(), max_value=max_date.date())
             with col7:
+                start_date = st.date_input("开始日期", min_value=min_date.date(), max_value=max_date.date())
+            with col8:
                 end_date = st.date_input("结束日期", min_value=min_date.date(), max_value=max_date.date())
         elif range_choice == "最近30天":
             start_date = (datetime.now() - timedelta(days=30)).date()
@@ -207,6 +223,7 @@ def render_filters():
             colors=colors or None,
             grades=grades or None,
             production_lines=lines or None,
+            departments=departments or None,  # 新增部门筛选
             start_date=start_date,
             end_date=end_date
         )
@@ -240,7 +257,7 @@ def render_results(df):
         st.info("📭 未找到匹配记录")
         return
 
-    search_term = st.text_input("🔍 快速搜索", placeholder="输入客户、颜色、备注等关键字筛选")
+    search_term = st.text_input("🔍 快速搜索", placeholder="输入客户、颜色、部门等关键字筛选")
     if search_term:
         df = df[df.apply(lambda r: search_term.lower() in ' '.join(r.astype(str).values).lower(), axis=1)]
 
@@ -257,15 +274,22 @@ def render_results(df):
         dataframe_height = 'stretch'
     else:
         dataframe_height = 550
-    st.dataframe(page_data, width='stretch',height=dataframe_height, hide_index=True, column_config={
-        '单价':st.column_config.NumberColumn(format="¥%.2f",width='small'),
-        '金额':st.column_config.NumberColumn(format="¥%.2f",width='small')
-    })
+    
+    # 配置列显示
+    column_config = {
+        '单价': st.column_config.NumberColumn(format="¥%.2f", width='small'),
+        '金额': st.column_config.NumberColumn(format="¥%.2f", width='small'),
+        '部门': st.column_config.TextColumn(width='small')  # 新增部门列配置
+    }
+    
+    st.dataframe(page_data, width='stretch', height=dataframe_height, 
+                 hide_index=True, column_config=column_config)
 
     render_pagination_controls(current_page, total_pages, len(df), df)
 
     csv_data = df.to_csv(index=False, encoding='utf-8-sig')
-    st.download_button("📥 导出查询结果", csv_data, "销售记录查询结果.csv", "text/csv", width='stretch')
+    st.download_button("📥 导出查询结果", csv_data, "销售记录查询结果.csv", 
+                      "text/csv", width='stretch', key="export_filtered")
 
 
 # ==============================
@@ -274,10 +298,16 @@ def render_results(df):
 def main():
     st.subheader("📋 最新价格数据")
     latest_df = get_latest_prices()
-    st.dataframe(latest_df, width='stretch', hide_index=True, column_config={
-        '单价':st.column_config.NumberColumn(format="¥%.2f",width='small'),
-        '金额':st.column_config.NumberColumn(format="¥%.2f",width='small')
-    })
+    
+    # 配置最新价格表格列显示
+    column_config = {
+        '单价': st.column_config.NumberColumn(format="¥%.2f", width='small'),
+        '金额': st.column_config.NumberColumn(format="¥%.2f", width='small'),
+        '部门': st.column_config.TextColumn(width='small')  # 新增部门列配置
+    }
+    
+    st.dataframe(latest_df, width='stretch', hide_index=True, 
+                 column_config=column_config)
 
     # 统计和导出 
     col1, col2 = st.columns([4, .75]) 
@@ -285,9 +315,8 @@ def main():
         st.caption(f"共 {len(latest_df):,} 条记录")
     with col2: 
         csv_data = latest_df.to_csv(index=False, encoding='utf-8-sig') 
-        st.download_button( "📥 导出最新价格数据", csv_data, "最新价格数据.csv", "text/csv", width='stretch')
-
-    # st.divider()
+        st.download_button("📥 导出最新价格数据", csv_data, "最新价格数据.csv", 
+                          "text/csv", width='stretch', key="export_latest")
 
     filters = render_filters()
     df = query_sales_records(filters)
