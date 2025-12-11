@@ -74,6 +74,7 @@ def show_example_format():
             "票号": ["0618YG049", "0619YG050"],
             "备注": ["", ""],
             "生产线": ["三线罗曼瓦", "三线罗曼瓦"],
+            "部门": ["一期", "二期"],  # 新增部门列
             "区域": ["衡阳", "衡阳"],
             "联系人": ["张三", "李四"],
             "电话": ["13800000000", "13800000001"],
@@ -81,12 +82,13 @@ def show_example_format():
         }
         
         example_df = pd.DataFrame(example_data)
-        st.dataframe(example_df, use_container_width=True)
+        st.dataframe(example_df, width='stretch')
         
         # 添加格式要求说明
         st.markdown("""
         **📝 格式要求说明：**
         - 必填列：`客户名称`、`编号`、`备注（小客户名称）`
+        - 新增`部门`列：用于记录所属部门（如：一期、二期等）
         - 其余列可为空；建议按需填写以便更完整分析
         - 列顺序可调整，但列名需一致；`票 号` 将自动识别为 `票号`
         - 日期请分别填入年、月、日列；缺失时系统将自动填充当前日期用于记录
@@ -196,7 +198,7 @@ def main():
         ok, preview = preview_excel_data(temp_path, 5)
         if ok:
             st.success(f"成功读取数据，共 {len(preview)} 行记录")
-            st.dataframe(preview, use_container_width=True)
+            st.dataframe(preview, width='stretch')
             
             # 显示数据统计
             cols = st.columns(3)
@@ -221,7 +223,7 @@ def main():
         if st.button(
             "开始导入数据", 
             type="primary", 
-            use_container_width=True,
+            width='stretch',
             key="import_button"
         ):
             execute_import(temp_path, strategy, replace_confirm)

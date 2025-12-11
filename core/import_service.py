@@ -94,7 +94,8 @@ class ImportService:
             '等级': 'object',
             '数量': 'object',
             '单价': 'object',
-            '金额': 'object'
+            '金额': 'object',
+            '部门': 'object'  # 新增
         }
         
         with warnings.catch_warnings():
@@ -218,8 +219,13 @@ class ImportService:
             '票号': 'ticket_number',
             '备注': 'remark',
             '生产线': 'production_line',
+            '部门': 'department',  # 新增部门
             '收款金额': 'collection_amount',
-            '余额': 'balance'
+            '余额': 'balance',
+            '区域': 'region',
+            '联系人': 'contact_person',
+            '电话': 'phone',
+            '是否活跃': 'is_active'
         }
         
         # 批量重命名 - 只重命名存在的列
@@ -227,13 +233,13 @@ class ImportService:
         df = df.rename(columns=existing_columns)
         
         # 确保必需的列存在，如果不存在则创建空列
-        required_columns = ['sub_customer_name', 'product_name', 'grade', 'ticket_number', 'remark', 'production_line']
+        required_columns = ['sub_customer_name', 'product_name', 'grade', 'ticket_number', 'remark', 'production_line', 'department']
         for col in required_columns:
             if col not in df.columns:
                 df[col] = ''
         
         # 使用安全的空值处理方法
-        string_columns = ['customer_name', 'finance_id', 'sub_customer_name', 'product_name', 'grade', 'ticket_number', 'remark', 'production_line', 'color']
+        string_columns = ['customer_name', 'finance_id', 'sub_customer_name', 'product_name', 'grade', 'ticket_number', 'remark', 'production_line', 'color', 'department']
         for col in string_columns:
             if col in df.columns:
                 # 使用安全的转换方法，避免 pd.NA
@@ -253,11 +259,11 @@ class ImportService:
         # 优化日期构建
         df['record_date'] = self._build_record_date_vectorized(df)
 
-        # 创建唯一标识符，用于数据去重和更新
+        # 创建唯一标识符，用于数据去重和更新（包含部门）
         df['data_key'] = df.apply(
             lambda row: f"{row['customer_name']}_{row['finance_id']}_{row['sub_customer_name']}_"
-                       f"{row['year']}_{row['month']}_{row['day']}_{row['product_name']}_"
-                       f"{row['color']}_{row['grade']}", 
+                    f"{row['year']}_{row['month']}_{row['day']}_{row['product_name']}_"
+                    f"{row['color']}_{row['grade']}_{row['department']}",
             axis=1
         )
         
@@ -372,7 +378,7 @@ class ImportService:
         query = """
             SELECT 
                 customer_name, finance_id, sub_customer_name, 
-                year, month, day, product_name, color, grade
+                year, month, day, product_name, color, grade, department
             FROM sales_records
         """
         
@@ -387,9 +393,10 @@ class ImportService:
         # 构建唯一标识符集合
         existing_keys = set()
         for record in existing_records:
+            
             key = f"{record['customer_name']}_{record['finance_id']}_{record['sub_customer_name']}_" \
                   f"{record['year']}_{record['month']}_{record['day']}_{record['product_name']}_" \
-                  f"{record['color']}_{record['grade']}"
+                  f"{record['color']}_{record['grade']}_{record['department']}"  # 添加部门
             existing_keys.add(key)
         
         return existing_keys
@@ -427,7 +434,8 @@ class ImportService:
                         self._safe_convert_value(row.get('ticket_number', ''), ''),
                         self._safe_convert_value(row.get('remark', ''), ''),
                         self._safe_convert_value(row.get('production_line', ''), ''),
-                        self._safe_convert_value(row['record_date'], datetime.now().strftime('%Y-%m-%d'))
+                        self._safe_convert_value(row['record_date'], datetime.now().strftime('%Y-%m-%d')),
+                        self._safe_convert_value(row.get('department', ''), '')  # 部门字段
                     )
                     
                     if record_key in existing_keys:
@@ -471,8 +479,8 @@ class ImportService:
                         INSERT INTO sales_records 
                         (customer_name, finance_id, sub_customer_name, year, month, day, 
                          product_name, color, grade, quantity, unit_price, amount, 
-                         ticket_number, remark, production_line, record_date)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         ticket_number, remark, production_line, record_date, department)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', all_records)
                 
                 # 获取统计信息
@@ -572,7 +580,8 @@ class ImportService:
                         self._safe_convert_value(row.get('ticket_number', ''), ''),
                         self._safe_convert_value(row.get('remark', ''), ''),
                         self._safe_convert_value(row.get('production_line', ''), ''),
-                        self._safe_convert_value(row['record_date'], datetime.now().strftime('%Y-%m-%d'))
+                        self._safe_convert_value(row['record_date'], datetime.now().strftime('%Y-%m-%d')),
+                        self._safe_convert_value(row.get('department', ''), '')  # 部门字段
                     )
                     sales_records.append(record)
                 
@@ -582,8 +591,8 @@ class ImportService:
                         INSERT INTO sales_records 
                         (customer_name, finance_id, sub_customer_name, year, month, day, 
                          product_name, color, grade, quantity, unit_price, amount, 
-                         ticket_number, remark, production_line, record_date)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         ticket_number, remark, production_line, record_date, department)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', sales_records)
                 
                 # 获取统计信息
@@ -600,6 +609,7 @@ class ImportService:
         record_count = len(df)
         product_varieties = df['product_name'].nunique() if 'product_name' in df.columns else 0
         color_varieties = df['color'].nunique() if 'color' in df.columns else 0
+        department_varieties = df['department'].nunique() if 'department' in df.columns else 0
         
         if updated_records > 0:
             return (f"数据更新成功！"
@@ -608,13 +618,15 @@ class ImportService:
                     f"新增记录: {new_records}, "
                     f"更新记录: {updated_records}, "
                     f"产品种类: {product_varieties}, "
-                    f"颜色种类: {color_varieties}")
+                    f"颜色种类: {color_varieties}, "
+                    f"部门种类: {department_varieties}")  # 新增部门统计
         else:
             return (f"数据导入成功！"
                     f"导入客户数: {customer_count}, "
                     f"销售记录数: {record_count}, "
                     f"产品种类: {product_varieties}, "
-                    f"颜色种类: {color_varieties}")
+                    f"颜色种类: {color_varieties}, "
+                    f"部门种类: {department_varieties}")  # 新增部门统计
 
     def import_multiple_files(self, file_paths: List[str], user: str = "system", update_strategy: str = "update") -> Dict[str, Any]:
         """批量导入多个文件"""
@@ -648,7 +660,8 @@ class ImportService:
                 cursor.execute('''
                     SELECT MAX(record_date) as latest_date, 
                            COUNT(*) as total_records,
-                           COUNT(DISTINCT customer_name) as unique_customers
+                           COUNT(DISTINCT customer_name) as unique_customers,
+                           COUNT(DISTINCT department) as unique_departments  -- 新增部门统计
                     FROM sales_records
                 ''')
                 
@@ -657,7 +670,8 @@ class ImportService:
                 return {
                     'latest_date': overview['latest_date'],
                     'total_records': overview['total_records'],
-                    'unique_customers': overview['unique_customers']
+                    'unique_customers': overview['unique_customers'],
+                    'unique_departments': overview['unique_departments']  # 新增部门统计
                 }
                 
             except Exception as e:

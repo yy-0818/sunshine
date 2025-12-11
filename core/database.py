@@ -84,6 +84,7 @@ def init_database():
                 ticket_number TEXT,
                 remark TEXT,
                 production_line TEXT,
+                department TEXT,  -- 新增部门字段
                 record_date DATE,
                 created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -104,13 +105,13 @@ def init_database():
                 FOREIGN KEY (sales_record_id) REFERENCES sales_records (id)
             )
             ''',
-            # 统一欠款表（合并古建和陶瓷）- 使用中文列名
+            # 统一欠款表（合并一二期）
             '''
             CREATE TABLE IF NOT EXISTS unified_debt (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 finance_id TEXT NOT NULL,
                 customer_name TEXT NOT NULL,
-                department TEXT NOT NULL,  -- '古建' 或 '陶瓷'
+                department TEXT NOT NULL,  -- '一期' 或 '二期'
                 debt_2023 REAL DEFAULT 0,
                 debt_2024 REAL DEFAULT 0,
                 debt_2025 REAL DEFAULT 0,
@@ -141,6 +142,7 @@ def init_database():
                 logger.info(f"成功创建表 {i+1}")
             except Exception as e:
                 logger.error(f"创建表 {i+1} 时出错: {e}")
+                raise
         
         # 批量创建索引
         index_scripts = [
@@ -154,6 +156,8 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_customer_finance ON customers(finance_id)',
             'CREATE INDEX IF NOT EXISTS idx_production_line ON sales_records(production_line)',
             'CREATE INDEX IF NOT EXISTS idx_production_line_date ON sales_records(production_line, record_date)',
+            'CREATE INDEX IF NOT EXISTS idx_department ON sales_records(department)',  # 新增部门索引
+            'CREATE INDEX IF NOT EXISTS idx_department_date ON sales_records(department, record_date)',  # 新增部门+日期索引
             # 欠款数据索引
             'CREATE INDEX IF NOT EXISTS idx_debt_finance_id ON unified_debt(finance_id)',
             'CREATE INDEX IF NOT EXISTS idx_debt_department ON unified_debt(department)',
@@ -170,7 +174,7 @@ def init_database():
             except Exception as e:
                 logger.error(f"创建索引 {i+1} 时出错: {e}")
         
-        # 检查并添加必要的列
+        # 检查并添加必要的列（修复检查逻辑）
         _check_and_alter_tables(cursor)
         # 创建默认用户
         _create_default_users(cursor)
@@ -179,33 +183,57 @@ def init_database():
 
 def _check_and_alter_tables(cursor):
     """检查并修改表结构"""
-    columns_to_add = [
-        ('customers', 'region', 'TEXT'),
-        ('customers', 'contact_person', 'TEXT'),
-        ('customers', 'phone', 'TEXT'),
-        ('sales_records', 'product_name', 'TEXT'),
-        ('sales_records', 'ticket_number', 'TEXT'),
-        ('users', 'department', 'TEXT'),
-        ('users', 'last_login', 'TIMESTAMP')
-    ]
-    
-    for table, column, col_type in columns_to_add:
-        try:
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
-            logger.info(f"成功添加列 {table}.{column}")
-        except sqlite3.OperationalError as e:
-            if "duplicate column name" in str(e):
-                logger.debug(f"列 {table}.{column} 已存在")
-            else:
-                logger.warning(f"列 {table}.{column} 添加失败: {e}")
-    
-    # 检查是否需要删除旧表
     try:
-        cursor.execute("DROP TABLE IF EXISTS department1_debt")
-        cursor.execute("DROP TABLE IF EXISTS department2_debt")
-        logger.info("已删除旧的部门欠款表")
+        # 首先检查表是否存在
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sales_records'")
+        table_exists = cursor.fetchone() is not None
+        
+        if not table_exists:
+            logger.error("sales_records 表不存在，无法添加列")
+            return
+        
+        # 检查哪些列不存在，然后添加
+        columns_to_check = [
+            ('sales_records', 'product_name', 'TEXT'),
+            ('sales_records', 'ticket_number', 'TEXT'),
+            ('sales_records', 'department', 'TEXT'),  # 新增部门字段
+            ('customers', 'region', 'TEXT'),
+            ('customers', 'contact_person', 'TEXT'),
+            ('customers', 'phone', 'TEXT'),
+            ('users', 'department', 'TEXT'),
+            ('users', 'last_login', 'TIMESTAMP')
+        ]
+        
+        for table, column, col_type in columns_to_check:
+            try:
+                # 首先检查表是否存在
+                cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+                if cursor.fetchone() is None:
+                    logger.warning(f"表 {table} 不存在，跳过添加列 {column}")
+                    continue
+                
+                # 检查列是否已存在
+                cursor.execute(f"PRAGMA table_info({table})")
+                existing_columns = [info[1] for info in cursor.fetchall()]
+                
+                if column not in existing_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                    logger.info(f"成功添加列 {table}.{column}")
+                else:
+                    logger.debug(f"列 {table}.{column} 已存在")
+                    
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e):
+                    logger.debug(f"列 {table}.{column} 已存在")
+                else:
+                    logger.warning(f"处理列 {table}.{column} 时出错: {e}")
+            except Exception as e:
+                logger.warning(f"处理列 {table}.{column} 时发生未知错误: {e}")
+                
     except Exception as e:
-        logger.warning(f"删除旧表失败: {e}")
+        logger.error(f"_check_and_alter_tables 执行失败: {e}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
 
 def _create_default_users(cursor):
     """创建默认用户"""
@@ -230,50 +258,166 @@ def _create_default_users(cursor):
 def get_database_status(days_threshold=30):
     """获取数据库状态，统一统计关键指标"""
     status = {}
-    with get_connection() as conn:
-        cursor = conn.cursor()
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
 
-        # 销售记录数量
-        cursor.execute("SELECT COUNT(*) FROM sales_records")
-        status['sales_records_count'] = cursor.fetchone()[0]
+            # 首先检查表是否存在
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sales_records'")
+            if cursor.fetchone() is None:
+                logger.warning("sales_records 表不存在，返回空状态")
+                return {
+                    'sales_records_count': 0,
+                    'total_sales': 0,
+                    'db_size_mb': 0,
+                    'sub_customers': 0,
+                    'main_customers': 0,
+                    'unique_colors': 0,
+                    'unique_products': 0,
+                    'active_sub_customers_recent': 0,
+                    'active_sub_customers_this_month': 0,
+                    'active_sub_customers_last_month': 0,
+                    'active_sub_customers_this_year': 0,
+                    'active_sub_customers_rate_recent': 0,
+                    'active_sub_customers_rate_this_month': 0,
+                    'debt_count': 0,
+                    'total_debt': 0,
+                    'department_debt_stats': 0,
+                }
 
-        # 总销售金额
-        cursor.execute("SELECT SUM(amount) FROM sales_records")
-        total_sales = cursor.fetchone()[0]
-        status['total_sales'] = total_sales if total_sales else 0
+            # 销售记录数量
+            cursor.execute("SELECT COUNT(*) FROM sales_records")
+            status['sales_records_count'] = cursor.fetchone()[0]
 
-        # 数据库大小
-        try:
-            db_size = os.path.getsize("ceramic_prices.db") / 1024 / 1024
-        except:
-            db_size = 0
-        status['db_size_mb'] = round(db_size, 2)
+            # 总销售金额
+            cursor.execute("SELECT SUM(amount) FROM sales_records")
+            total_sales = cursor.fetchone()[0]
+            status['total_sales'] = total_sales if total_sales else 0
 
-        # 统一欠款统计
-        cursor.execute("SELECT COUNT(*) FROM unified_debt")
-        status['debt_count'] = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT SUM(debt_2025) FROM unified_debt")
-        total_debt = cursor.fetchone()[0]
-        status['total_debt'] = total_debt if total_debt else 0
-        
-        # 按部门统计欠款
-        cursor.execute("""
-            SELECT 
-                department,
-                COUNT(*) as count,
-                SUM(debt_2025) as total_debt
-            FROM unified_debt
-            GROUP BY department
-        """)
-        dept_stats = cursor.fetchall()
-        status['department_debt_stats'] = {}
-        for dept, count, total in dept_stats:
-            status['department_debt_stats'][dept] = {
-                'count': count,
-                'total_debt': total if total else 0
-            }
+            # 数据库大小
+            try:
+                db_size = os.path.getsize("ceramic_prices.db") / 1024 / 1024
+            except:
+                db_size = 0
+            status['db_size_mb'] = round(db_size, 2)
+            
+            # 总客户or子客户数（唯一 customer_name, finance_id, sub_customer_name）
+            cursor.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                    FROM customers
+                    WHERE customer_name IS NOT NULL 
+                        AND finance_id IS NOT NULL 
+                        AND sub_customer_name IS NOT NULL
+                ) AS unique_customers
+            """)
+            status['sub_customers'] = cursor.fetchone()[0]
 
+            # 主客户数（唯一 customer_name,finance_id）
+            cursor.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT customer_name, finance_id
+                    FROM customers
+                    WHERE customer_name IS NOT NULL
+                        AND finance_id IS NOT NULL
+                ) AS unique_customers
+            """)
+            status['main_customers'] = cursor.fetchone()[0]
+
+            # 产品颜色数
+            cursor.execute("SELECT COUNT(DISTINCT color) FROM sales_records")
+            status['unique_colors'] = cursor.fetchone()[0]
+
+            # 产品数
+            cursor.execute("SELECT COUNT(DISTINCT product_name) FROM sales_records")
+            status['unique_products'] = cursor.fetchone()[0]
+
+            # ================== 基于子客户的活跃客户统计 ==================
+
+            # 最近N天内的活跃子客户数 - 使用子查询方式
+            cursor.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                    FROM sales_records 
+                    WHERE record_date >= date('now', ?)
+                )
+            """, (f'-{days_threshold} days',))
+            status['active_sub_customers_recent'] = cursor.fetchone()[0]
+
+            # 本月活跃子客户数
+            cursor.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                    FROM sales_records 
+                    WHERE strftime('%Y-%m', record_date) = strftime('%Y-%m', 'now')
+                )
+            """)
+            status['active_sub_customers_this_month'] = cursor.fetchone()[0]
+
+            # 上月活跃子客户数
+            cursor.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                    FROM sales_records 
+                    WHERE strftime('%Y-%m', record_date) = strftime('%Y-%m', 'now', '-1 month')
+                )
+            """)
+            status['active_sub_customers_last_month'] = cursor.fetchone()[0]
+
+            # 年度活跃子客户数
+            cursor.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT customer_name, finance_id, sub_customer_name
+                    FROM sales_records 
+                    WHERE strftime('%Y', record_date) = strftime('%Y', 'now')
+                )
+            """)
+            status['active_sub_customers_this_year'] = cursor.fetchone()[0]
+
+            # 计算活跃率
+            total_sub_customers = status['sub_customers']
+            if total_sub_customers > 0:
+                status['active_sub_customers_rate_recent'] = round(status['active_sub_customers_recent'] / total_sub_customers * 100, 2)
+                status['active_sub_customers_rate_this_month'] = round(status['active_sub_customers_this_month'] / total_sub_customers * 100, 2)
+            else:
+                status['active_sub_customers_rate_recent'] = 0
+                status['active_sub_customers_rate_this_month'] = 0
+
+            # 统一欠款统计
+            cursor.execute("SELECT COUNT(*) FROM unified_debt")
+            status['debt_count'] = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT SUM(debt_2025) FROM unified_debt")
+            total_debt = cursor.fetchone()[0]
+            status['total_debt'] = total_debt if total_debt else 0
+            
+            # 按部门统计欠款
+            cursor.execute("""
+                SELECT 
+                    department,
+                    COUNT(*) as count,
+                    SUM(debt_2025) as total_debt
+                FROM unified_debt
+                GROUP BY department
+            """)
+            dept_stats = cursor.fetchall()
+            status['department_debt_stats'] = {}
+            for dept, count, total in dept_stats:
+                status['department_debt_stats'][dept] = {
+                    'count': count,
+                    'total_debt': total if total else 0
+                }
+
+            # 部门统计（新增）
+            cursor.execute("SELECT COUNT(DISTINCT department) FROM sales_records WHERE department IS NOT NULL AND department != ''")
+            status['unique_departments'] = cursor.fetchone()[0]
+            
+    except Exception as e:
+        logger.error(f"获取数据库状态失败: {e}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
+        return {}
+    
     return status
 
 def optimize_database():
