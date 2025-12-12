@@ -51,7 +51,7 @@ def validate_excel_structure(file_path: str) -> Tuple[bool, str]:
             mapped_headers.append(mapped_header)
         
         # 必需的表头（映射后的标准表头）
-        required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '颜色', '等级', '数量', '单价', '金额', '票号', '备注', '生产线']
+        required_headers = ['客户名称', '编号', '子客户名称', '年', '月', '日', '颜色', '等级', '数量', '单价', '金额', '票号', '备注', '生产线', '部门']
         
         # 去除空格后的表头用于匹配
         mapped_headers_no_space = [h.replace(' ', '') for h in mapped_headers]
@@ -228,6 +228,7 @@ def get_excel_file_info(file_path: str) -> Dict[str, Any]:
                 "customer_count": df[customer_col].nunique() if customer_col in df.columns else 0,
                 "product_count": df[product_col].nunique() if product_col and product_col in df.columns else 0,
                 "color_count": df[color_col].nunique() if color_col in df.columns else 0,
+                "department_count": df['部门'].nunique() if '部门' in df.columns else 0,  # 新增部门统计
                 "has_numeric_data": any(col in df.columns for col in [quantity_col, price_col, amount_col])
             })
         
