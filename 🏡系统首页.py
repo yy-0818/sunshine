@@ -47,7 +47,7 @@ def show_login_page():
         
         **📊 全面的数据分析**
         - 销售数据管理与分析
-        - 客户欠款风险监控
+        - 客户债务风险监控
         - 价格趋势智能分析
         
         **👥 多级权限管理**
@@ -140,8 +140,8 @@ def render_dashboard():
         if st.button("👥 客户管理", use_container_width=True):
             st.switch_page("pages/6_👥_客户管理.py")
     with col7:
-        if st.button("💳 客户欠款", use_container_width=True):
-            st.switch_page("pages/7_💳_客户欠款.py")
+        if st.button("💳 客户债务", use_container_width=True):
+            st.switch_page("pages/7_💳_客户债务.py")
     with col8:
         if st.button("⚙️ 系统设置", use_container_width=True):
             st.switch_page("pages/8_⚙️_系统设置.py")

@@ -209,7 +209,7 @@ else:
     with col4:
         col4.metric("月活跃客户", status["active_sub_customers_this_month"],
                    status["active_sub_customers_this_month"]-status["active_sub_customers_last_month"],
-                   help="在过去一个月内有过订单的客户")
+                   help="在本月内有过订单的客户")
 
     # 客户查询
     st.subheader("🔍 客户查询")
