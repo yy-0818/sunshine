@@ -68,8 +68,7 @@ tables = [
     ("customers", "客户信息表", db_status.get("sub_customers", 0)),
     ("sales_records", "销售记录表", db_status.get("sales_records_count", 0)),
     ("price_change_history", "价格变更表", db_status.get("price_change_history_count", 0)),
-    ("department1_debt", "古建客户欠款表", db_status.get("dept1_debt_count", 0)),
-    ("department2_debt", "陶瓷客户欠款表", db_status.get("dept2_debt_count", 0))
+    ("unified_debt", "客户欠款表", db_status.get("debt_count", 0)),
 ]
 df_tables = pd.DataFrame(tables, columns=["表名", "描述", "记录数"])
 st.dataframe(df_tables, width='stretch', hide_index=True)
