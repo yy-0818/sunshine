@@ -70,6 +70,12 @@ RISK_SCORE_COLORS = {
     (0, 20): '#FFEBEE'      # 高风险背景色
 }
 
+# 风险等级排序顺序
+RISK_LEVEL_ORDER = ['低风险', '较低风险', '中等风险', '较高风险', '高风险']
+
+# 销售活跃度排序顺序
+ACTIVITY_ORDER = ['活跃(30天内)', '一般活跃(90天内)', '低活跃(180天内)', '休眠客户', '一年内无销售', '无销售记录']
+
 # -----------------------------------------------------------------------------
 # 2. 工具函数
 # -----------------------------------------------------------------------------
@@ -124,21 +130,21 @@ def get_column_config(year=25):
         "财务编号": st.column_config.TextColumn("财务编号", width="small", help="统一的财务编号格式"),
         "客户代码": st.column_config.TextColumn("客户代码", width="small"),
         "客户名称": st.column_config.TextColumn("客户名称", width="medium"),
-        "2023欠款": st.column_config.NumberColumn("2023欠款", format="¥%.2f", min_value=0),
-        "2024欠款": st.column_config.NumberColumn("2024欠款", format="¥%.2f", min_value=0),
+        "2023欠款": st.column_config.NumberColumn("2023欠款", format="¥%.2f", min_value=0, help="2023年度欠款金额"),
+        "2024欠款": st.column_config.NumberColumn("2024欠款", format="¥%.2f", min_value=0, help="2024年度欠款金额"),
         "2025欠款": st.column_config.NumberColumn("2025欠款", format="¥%.2f", min_value=0, help="当前年度最新欠款金额"),
-        "总销售额": st.column_config.NumberColumn("总销售额", format="¥%.2f", help="累计总销售额"),
-        f"{year_prefix}销售额": st.column_config.NumberColumn(f"{year_prefix}销售额", format="¥%.2f", help=f"{year_prefix}年销售额"),
-        "累计销售量": st.column_config.NumberColumn("累计销售量", format="%d"),
-        "欠销比": st.column_config.NumberColumn("欠销比", format="%.1f%%", help="欠款占销售额的比例"),
-        "销售活跃度": st.column_config.TextColumn("销售活跃度", width="medium"),
-        "客户综合等级": st.column_config.TextColumn("综合等级", width="medium"),
+        f"{year_prefix}销售额": st.column_config.NumberColumn(f"{year_prefix}销售额", format="¥%.2f", help=f"{year_prefix}年度销售额"),
+        "总销售额": st.column_config.NumberColumn("历史总销售额", format="¥%.2f", help="累计历史总销售额"),
+        "累计销售量": st.column_config.NumberColumn("累计销售量", format="%d", help="累计销售数量"),
+        "欠销比": st.column_config.NumberColumn("欠销比", format="%.1f%%", help="当年欠款占当年销售额的比例"),
+        "销售活跃度": st.column_config.TextColumn("销售活跃度", width="medium", help="基于最近交易时间的活跃度分类"),
+        "客户综合等级": st.column_config.TextColumn("综合等级", width="medium", help="综合销售额、欠款和活跃度的客户等级"),
         "风险评分": st.column_config.NumberColumn("风险分", format="%.0f", help="0-100分，分数越高风险越低"),
-        "风险等级": st.column_config.TextColumn("风险等级", width="medium"),
-        "最后销售日期": st.column_config.DateColumn("最后销售日期", format="YYYY-MM-DD"),
-        "交易次数": st.column_config.NumberColumn("交易次数", format="%d"),
-        "产品种类数": st.column_config.NumberColumn("产品种类", format="%d"),
-        "所属部门": st.column_config.TextColumn("所属部门", width="small"),
+        "风险等级": st.column_config.TextColumn("风险等级", width="medium", help="基于风险评分的风险分类"),
+        "最后销售日期": st.column_config.DateColumn("最后销售日期", format="YYYY-MM-DD", help="最近一次销售日期"),
+        "交易次数": st.column_config.NumberColumn("交易次数", format="%d", help="累计交易次数"),
+        "产品种类数": st.column_config.NumberColumn("产品种类", format="%d", help="购买过的产品种类数量"),
+        "所属部门": st.column_config.TextColumn("所属部门", width="small", help="客户所属业务部门"),
     }
     return config
 
@@ -186,6 +192,13 @@ def get_integrated_data(integration_service, year=25):
         print(f"开始获取综合数据，年份: {year}")
         integrated_df = integration_service.get_integrated_customer_analysis(year)
         
+        if integrated_df.empty:
+            return integrated_df
+        
+        # 由于历史销售数据只有2025年，所以2025销售额就是总销售额
+        year_sales_column = f'20{year}销售额'
+        integrated_df[year_sales_column] = integrated_df['总销售额']
+        
         return integrated_df
     except Exception as e:
         st.error(f"获取综合数据失败: {str(e)}")
@@ -193,56 +206,29 @@ def get_integrated_data(integration_service, year=25):
         print(traceback.format_exc())
         return pd.DataFrame()
 
-def get_sales_by_year(integration_service, year=25):
-    """获取指定年份的销售数据"""
-    try:
-        with get_connection() as conn:
-            sales_query = f'''
-                SELECT 
-                    finance_id,
-                    customer_name,
-                    SUM(amount) as year_sales,
-                    SUM(quantity) as year_quantity,
-                    COUNT(*) as year_transactions
-                FROM sales_records
-                WHERE finance_id IS NOT NULL 
-                    AND finance_id != '' 
-                    AND year = ?
-                GROUP BY finance_id, customer_name
-            '''
-            sales_df = pd.read_sql(sales_query, conn, params=(year,))
-            
-            if sales_df.empty:
-                return sales_df
-            
-            sales_df['finance_id'] = sales_df['finance_id'].astype(str).str.strip()
-            
-            def remove_leading_zeros(finance_id):
-                if pd.isna(finance_id):
-                    return ''
-                try:
-                    return str(int(float(str(finance_id))))
-                except:
-                    return str(finance_id)
-            
-            sales_df['finance_id'] = sales_df['finance_id'].apply(remove_leading_zeros)
-            
-            return sales_df
-    except Exception as e:
-        st.error(f"获取销售数据失败: {str(e)}")
-        return pd.DataFrame()
+def sort_risk_levels(levels):
+    """按预定义顺序对风险等级进行排序"""
+    if not levels:
+        return []
+    
+    # 创建等级到位置的映射
+    level_to_order = {level: i for i, level in enumerate(RISK_LEVEL_ORDER)}
+    
+    # 对不在预定义顺序中的等级，按字母顺序排在后面
+    sorted_levels = sorted(levels, key=lambda x: (level_to_order.get(x, 999), x))
+    return sorted_levels
 
-def get_year_sales_total(year):
-    """获取指定年份的总销售额（包含退款退货）"""
-    try:
-        with get_connection() as conn:
-            query = f"SELECT SUM(amount) as total_sales FROM sales_records WHERE year = ?"
-            result = pd.read_sql(query, conn, params=(year,))
-            total_sales = result.iloc[0]['total_sales'] if not result.empty else 0
-            return total_sales if total_sales is not None else 0
-    except Exception as e:
-        st.error(f"获取年份销售额失败: {str(e)}")
-        return 0
+def sort_activity_levels(levels):
+    """按预定义顺序对销售活跃度进行排序"""
+    if not levels:
+        return []
+    
+    # 创建活跃度到位置的映射
+    activity_to_order = {activity: i for i, activity in enumerate(ACTIVITY_ORDER)}
+    
+    # 对不在预定义顺序中的活跃度，按字母顺序排在后面
+    sorted_levels = sorted(levels, key=lambda x: (activity_to_order.get(x, 999), x))
+    return sorted_levels
 
 # -----------------------------------------------------------------------------
 # 3. 数据导入页面
@@ -311,11 +297,11 @@ def render_data_import_tab(debt_service):
                                     
                                     col_stat1, col_stat2, col_stat3 = st.columns(3)
                                     with col_stat1:
-                                        st.metric("总欠款额", format_currency(df_clean['debt_2025'].sum()))
+                                        st.metric("总欠款额", format_currency(df_clean['debt_2025'].sum()), help="当前年度欠款总额")
                                     with col_stat2:
-                                        st.metric("有欠款客户", len(df_clean[df_clean['debt_2025'] > 0]))
+                                        st.metric("有欠款客户", len(df_clean[df_clean['debt_2025'] > 0]), help="有欠款的客户数量")
                                     with col_stat3:
-                                        st.metric("无欠款客户", len(df_clean[df_clean['debt_2025'] == 0]))
+                                        st.metric("无欠款客户", len(df_clean[df_clean['debt_2025'] == 0]), help="无欠款的客户数量")
                                 else:
                                     st.warning(f"⚠️ 导入完成。成功: {success_count}, 失败: {error_count}")
                                     if error_count > 0:
@@ -386,9 +372,9 @@ def render_review_analysis_tab(integration_service):
         with col2:
             department_filter = st.multiselect(
                 "🏢 部门筛选",
-                options=['二期', '一期'],
-                default=['二期', '一期'],
-                help="选择分析的部门"
+                options=['一期', '二期'],
+                default=['一期', '二期'],
+                placeholder="请选择部门..."
             )
         
         with col3:
@@ -415,9 +401,17 @@ def render_review_analysis_tab(integration_service):
             
             # 欠款筛选
             debt_column = f'20{analysis_year}欠款'
+            year_sales_column = f'20{analysis_year}销售额'
             if min_debt > 0 and debt_column in integrated_df.columns:
                 mask = integrated_df[debt_column] >= min_debt
                 integrated_df = integrated_df[mask]
+            
+            # 重新计算欠销比（使用对应年份的销售额）
+            if year_sales_column in integrated_df.columns:
+                integrated_df['欠销比'] = integrated_df.apply(
+                    lambda row: (row[debt_column] / row[year_sales_column] * 100) if row[year_sales_column] > 0 else 0,
+                    axis=1
+                )
             
         except Exception as e:
             st.error(f"❌ 数据获取失败: {str(e)}")
@@ -434,7 +428,16 @@ def render_review_analysis_tab(integration_service):
     debt_column = f'20{analysis_year}欠款'
     total_debt = integrated_df[debt_column].sum() if debt_column in integrated_df.columns else 0
     
+    year_sales_column = f'20{analysis_year}销售额'
+    year_sales_total = integrated_df[year_sales_column].sum() if year_sales_column in integrated_df.columns else 0
+    
     total_sales = integrated_df['总销售额'].sum() if '总销售额' in integrated_df.columns else 0
+    
+    # 计算整体风险评分（平均值）
+    if '风险评分' in integrated_df.columns:
+        avg_risk_score = integrated_df['风险评分'].mean()
+    else:
+        avg_risk_score = 0
     
     # 计算有销售的客户数量
     if '总销售额' in integrated_df.columns:
@@ -443,29 +446,37 @@ def render_review_analysis_tab(integration_service):
         customers_with_sales = 0
     
     # 计算欠销比
-    debt_sales_ratio = (total_debt / total_sales * 100) if total_sales > 0 else 0
+    debt_sales_ratio = (total_debt / year_sales_total * 100) if year_sales_total > 0 else 0
     
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
     
     with kpi1:
-        st.metric("分析客户数", f"{total_customers:,}")
+        st.metric("分析客户数", f"{total_customers:,}", help="符合筛选条件的客户总数")
     
     with kpi2:
         st.metric(
             f"20{analysis_year}总欠款",
             format_currency(total_debt),
-            f"欠销比: {debt_sales_ratio:.1f}%" if total_sales > 0 else "无销售",
-            delta_color="inverse"
+            f"欠销比: {debt_sales_ratio:.1f}%" if year_sales_total > 0 else "无销售",
+            delta_color="inverse",
+            help=f"20{analysis_year}年度欠款总额"
         )
     
     with kpi3:
         st.metric(
-            "总销售额",
-            format_currency(total_sales),
-            f"有销售客户: {customers_with_sales}个"
+            f"20{analysis_year}销售额",
+            format_currency(year_sales_total),
+            help=f"20{analysis_year}年度销售额"
         )
     
     with kpi4:
+        st.metric(
+            "整体风险评分",
+            f"{avg_risk_score:.1f}",
+            help="所有客户风险评分的平均值（0-100分）"
+        )
+    
+    with kpi5:
         if '风险等级' in integrated_df.columns:
             high_risk_mask = integrated_df['风险等级'].isin(['高风险', '较高风险'])
             high_risk_customers = integrated_df[high_risk_mask].shape[0]
@@ -474,17 +485,18 @@ def render_review_analysis_tab(integration_service):
                 "风险客户",
                 f"{high_risk_customers:,}",
                 f"{high_risk_ratio:.1f}%",
-                delta_color="inverse"
+                delta_color="inverse",
+                help="高风险和较高风险客户数量"
             )
         else:
-            st.metric("风险客户", "N/A")
+            st.metric("风险客户", "N/A", help="高风险和较高风险客户数量")
     
     st.divider()
     
     st.subheader("📋 详细数据查看")
     
     with st.container(border=True):
-        col_filter1, col_filter2, col_filter3 = st.columns(3)
+        col_filter1, col_filter2, col_filter3, col_filter4 = st.columns(4)
         
         with col_filter1:
             search_term = st.text_input(
@@ -497,16 +509,54 @@ def render_review_analysis_tab(integration_service):
         with col_filter2:
             if '风险等级' in integrated_df.columns:
                 risk_options = integrated_df['风险等级'].unique().tolist()
-                risk_selected = st.multiselect("风险等级", options=risk_options)
+                # 使用自定义排序函数对风险等级进行排序
+                sorted_risk_options = sort_risk_levels(risk_options)
+                if sorted_risk_options:
+                    risk_selected = st.multiselect(
+                        "风险等级", 
+                        options=sorted_risk_options,
+                        placeholder="请选择风险等级..."
+                    )
+                else:
+                    risk_selected = []
+                    st.multiselect("风险等级", options=[], disabled=True, placeholder="无可用选项")
             else:
                 risk_selected = []
+                st.multiselect("风险等级", options=[], disabled=True, placeholder="无数据")
         
         with col_filter3:
             if '客户综合等级' in integrated_df.columns:
-                grade_options = integrated_df['客户综合等级'].unique().tolist()
-                grade_selected = st.multiselect("综合等级", options=grade_options)
+                grade_options = sorted(integrated_df['客户综合等级'].unique().tolist())
+                if grade_options:
+                    grade_selected = st.multiselect(
+                        "综合等级", 
+                        options=grade_options,
+                        placeholder="请选择综合等级..."
+                    )
+                else:
+                    grade_selected = []
+                    st.multiselect("综合等级", options=[], disabled=True, placeholder="无可用选项")
             else:
                 grade_selected = []
+                st.multiselect("综合等级", options=[], disabled=True, placeholder="无数据")
+        
+        with col_filter4:
+            if '销售活跃度' in integrated_df.columns:
+                activity_options = integrated_df['销售活跃度'].unique().tolist()
+                # 使用自定义排序函数对销售活跃度进行排序
+                sorted_activity_options = sort_activity_levels(activity_options)
+                if sorted_activity_options:
+                    activity_selected = st.multiselect(
+                        "销售活跃度", 
+                        options=sorted_activity_options,
+                        placeholder="请选择销售活跃度..."
+                    )
+                else:
+                    activity_selected = []
+                    st.multiselect("销售活跃度", options=[], disabled=True, placeholder="无可用选项")
+            else:
+                activity_selected = []
+                st.multiselect("销售活跃度", options=[], disabled=True, placeholder="无数据")
     
     df_display = integrated_df.copy()
     
@@ -523,11 +573,14 @@ def render_review_analysis_tab(integration_service):
     if grade_selected:
         df_display = df_display[df_display['客户综合等级'].isin(grade_selected)]
     
+    if activity_selected:
+        df_display = df_display[df_display['销售活跃度'].isin(activity_selected)]
+    
     # 定义显示的列
     base_columns = ['财务编号', '客户名称', '所属部门']
-    sales_columns = ['总销售额']
+    sales_columns = [year_sales_column, '总销售额'] if year_sales_column in df_display.columns else ['总销售额']
     debt_columns = [debt_column, '欠销比'] if '欠销比' in df_display.columns else [debt_column]
-    analysis_columns = ['销售活跃度', '客户综合等级', '风险评分']
+    analysis_columns = ['销售活跃度', '客户综合等级', '风险评分', '风险等级']
     
     display_columns = base_columns + sales_columns + debt_columns + analysis_columns
     display_columns = [col for col in display_columns if col in df_display.columns]
@@ -552,18 +605,21 @@ def render_review_analysis_tab(integration_service):
     )
     
     # 底部信息
-    col_info1, col_info2, col_info3 = st.columns(3)
+    col_info1, col_info2, col_info3, col_info4 = st.columns(4)
     with col_info1:
         st.caption(f"📊 显示 {len(df_display)} / {len(integrated_df)} 条记录")
     
     with col_info2:
-        # if not df_display.empty:
         filtered_debt = df_display[debt_column].sum() if debt_column in df_display.columns else 0
         st.caption(f"💰 筛选欠款: {format_currency(filtered_debt)}")
     
     with col_info3:
-        filtered_sales = df_display['总销售额'].sum() if '总销售额' in df_display.columns else 0
-        st.caption(f"💰 销售额: {format_currency(filtered_sales)}")
+        filtered_year_sales = df_display[year_sales_column].sum() if year_sales_column in df_display.columns else 0
+        st.caption(f"💰 {year_sales_column}: {format_currency(filtered_year_sales)}")
+    
+    with col_info4:
+        filtered_total_sales = df_display['总销售额'].sum() if '总销售额' in df_display.columns else 0
+        st.caption(f"💰 历史销售额: {format_currency(filtered_total_sales)}")
 
     # 导出功能
     if not df_display.empty:
@@ -573,7 +629,8 @@ def render_review_analysis_tab(integration_service):
             data=csv,
             file_name=f"客户信用分析_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
-            width='stretch'
+            width='stretch',
+            help="导出当前筛选条件下的数据"
         )
 
 # -----------------------------------------------------------------------------
@@ -635,16 +692,16 @@ def render_customer_detail_view(integration_service):
                 with col_overview3:
                     if not customer_detail['debt_records'].empty:
                         total_debt = customer_detail['debt_records']['debt_2025'].sum()
-                        st.metric("当前欠款", f"¥{total_debt:,.2f}")
+                        st.metric("当前欠款", f"¥{total_debt:,.2f}", help="2025年度欠款总额")
                     else:
-                        st.metric("当前欠款", "¥0.00", "无欠款记录")
+                        st.metric("当前欠款", "¥0.00", "无欠款记录", help="2025年度欠款总额")
                 
                 with col_overview4:
                     if not customer_detail['sales_records'].empty:
                         unique_products = customer_detail['sales_records']['product_name'].nunique()
-                        st.metric("产品种类", unique_products, "种产品")
+                        st.metric("产品种类", unique_products, "种产品", help="购买过的产品种类数量")
                     else:
-                        st.metric("产品种类", 0, "无销售记录")
+                        st.metric("产品种类", 0, "无销售记录", help="购买过的产品种类数量")
                 
                 if customer_detail.get('finance_ids'):
                     st.info(f"📊 相关财务编号: {', '.join(map(str, customer_detail['finance_ids']))}")
@@ -660,21 +717,21 @@ def render_customer_detail_view(integration_service):
                     
                     with col_stats1:
                         total_records = len(sales_df)
-                        st.metric("总交易笔数", total_records)
+                        st.metric("总交易笔数", total_records, help="累计交易次数")
                     
                     with col_stats2:
                         if not sales_df.empty:
                             unique_finance_ids = sales_df['finance_id'].nunique()
-                            st.metric("户头数量", unique_finance_ids)
+                            st.metric("户头数量", unique_finance_ids, help="关联的财务编号数量")
                     
                     with col_stats3:
                         if not sales_df.empty and 'record_date' in sales_df.columns:
                             try:
                                 recent_sales = sales_df.sort_values('record_date', ascending=False).iloc[0]
                                 recent_date = recent_sales['record_date'].strftime('%Y-%m-%d') if hasattr(recent_sales['record_date'], 'strftime') else str(recent_sales['record_date'])
-                                st.metric("最近交易", recent_date)
+                                st.metric("最近交易", recent_date, help="最近一次交易日期")
                             except:
-                                st.metric("最近交易", "未知")
+                                st.metric("最近交易", "未知", help="最近一次交易日期")
                     
                     st.dataframe(
                         sales_df,
@@ -713,11 +770,11 @@ def render_customer_detail_view(integration_service):
                     
                     with col_debt1:
                         total_debt_2025 = debt_data['debt_2025'].sum()
-                        st.metric("2025总欠款", f"¥{total_debt_2025:,.2f}")
+                        st.metric("2025总欠款", f"¥{total_debt_2025:,.2f}", help="2025年度欠款总额")
                     
                     with col_debt2:
                         unique_departments = debt_data['department'].nunique()
-                        st.metric("涉及部门", unique_departments)
+                        st.metric("涉及部门", unique_departments, help="欠款涉及的部门数量")
                     
                     for dept in debt_data['department'].unique():
                         dept_data = debt_data[debt_data['department'] == dept]
@@ -891,7 +948,7 @@ def render_classification_help_tab():
         
         with col_metric1:
             st.markdown("**欠销比 (Debt-to-Sales Ratio)**")
-            st.latex(r"\text{欠销比} = \frac{\text{当前欠款金额}}{\text{历史总销售额}} \times 100\%")
+            st.latex(r"\text{欠销比} = \frac{\text{当年欠款金额}}{\text{当年销售额}} \times 100\%")
             st.caption("**风险评估**：")
             st.markdown("- <20%：低风险")
             st.markdown("- 20%-50%：中等风险")
@@ -900,27 +957,28 @@ def render_classification_help_tab():
         with col_metric2:
             st.markdown("**销售活跃度 (Sales Activity)**")
             st.markdown("**分类标准**：")
-            st.markdown("- **活跃**：近3个月有交易")
-            st.markdown("- **一般**：3-6个月内有交易")
-            st.markdown("- **休眠**：6-12个月内有交易")
-            st.markdown("- **长期休眠**：>12个月无交易")
+            st.markdown("- **活跃(30天内)**：近30天有交易")
+            st.markdown("- **一般活跃(90天内)**：30-90天内有交易")
+            st.markdown("- **低活跃(180天内)**：90-180天内有交易")
+            st.markdown("- **休眠客户**：180-365天内有交易")
+            st.markdown("- **一年内无销售**：超过365天无交易")
     
     with tab_calculation:
         st.subheader("📐 核心计算模型")
         
         # 主计算公式部分
         st.markdown("### 1. 欠销比计算")
-        st.latex(r"\text{欠销比} = \frac{\text{当前欠款}}{\text{历史总销售额}} \times 100\%")
+        st.latex(r"\text{欠销比} = \frac{\text{当年欠款}}{\text{当年销售额}} \times 100\%")
         
         # 示例计算
         with st.expander("计算示例", expanded=False):
             st.code("""
-# 客户示例数据：
-总销售额 = 1,200,000元
-当前欠款 = 180,000元
+            # 客户示例数据：
+            当年销售额 = 1,200,000元
+            当年欠款 = 180,000元
 
-# 计算过程：
-欠销比 = (180,000 ÷ 1,200,000) × 100% = 15.0%
+            # 计算过程：
+            欠销比 = (180,000 ÷ 1,200,000) × 100% = 15.0%
             """)
         
         st.markdown("### 2. 风险评分模型")
@@ -943,22 +1001,26 @@ def render_classification_help_tab():
             st.markdown("**活跃度扣分规则**")
             st.latex(r"""
             \begin{cases}
-            0 & \text{近3个月有交易} \\
-            5 & \text{近3-6个月有交易} \\
-            15 & \text{近6-12个月有交易} \\
-            30 & \text{超过12个月无交易}
+            0 & \text{近30天有交易} \\
+            5 & \text{近30-90天有交易} \\
+            10 & \text{近90-180天有交易} \\
+            20 & \text{近180-365天有交易} \\
+            30 & \text{超过365天无交易}
             \end{cases}
             """)
         
-        # 客户规模修正
-        st.markdown("**客户规模修正系数**")
+        # 客户规模修正（上限为100分）
+        st.markdown("**客户规模修正系数（上限100分）**")
         st.latex(r"""
         \begin{cases}
-        1.1 & \text{年销售额} \geq 50\text{万元} \\
-        1.0 & 5\text{万元} \leq \text{年销售额} < 50\text{万元} \\
-        0.9 & \text{年销售额} < 5\text{万元}
+        +10 & \text{年销售额} \geq 500\text{万元} \\
+        +5 & 50\text{万元} \leq \text{年销售额} < 500\text{万元} \\
+        0 & \text{年销售额} < 50\text{万元}
         \end{cases}
         """)
+        
+        st.markdown("**风险评分上限**")
+        st.latex(r"\text{最终评分} = \min(100, \text{基础评分} + \text{规模修正})")
         
         # 实际计算示例
         st.markdown("### 3. 实际计算案例")
@@ -966,26 +1028,26 @@ def render_classification_help_tab():
         example_data = [
             {
                 "案例": "优质大客户",
-                "总销售额": "800,000元",
-                "当前欠款": "0元",
+                "当年销售额": "800,000元",
+                "当年欠款": "0元",
                 "欠销比": "0%",
                 "最后交易": "30天前",
-                "计算过程": "100分 - 0 - 0 = 100 × 1.1 = 110分",
+                "计算过程": "100分 - 0 - 0 + 5 = 105分 → 100分",
                 "风险等级": "低风险"
             },
             {
                 "案例": "高风险客户",
-                "总销售额": "150,000元",
-                "当前欠款": "90,000元",
+                "当年销售额": "150,000元",
+                "当年欠款": "90,000元",
                 "欠销比": "60%",
                 "最后交易": "200天前",
-                "计算过程": "100 - 22 - 15 = 63分",
+                "计算过程": "100 - 22 - 20 = 58分",
                 "风险等级": "中等风险"
             },
             {
                 "案例": "纯欠款客户",
-                "总销售额": "0元",
-                "当前欠款": "50,000元",
+                "当年销售额": "0元",
+                "当年欠款": "50,000元",
                 "欠销比": "100%",
                 "最后交易": "从未交易",
                 "计算过程": "100 - 50 - 30 = 20分",
