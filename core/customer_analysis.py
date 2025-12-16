@@ -7,8 +7,61 @@ class SalesDebtIntegrationService:
     def __init__(self):
         pass
     
+    def _get_year_sales_data(self, year=25):
+        """获取指定年份的销售数据 - 按财务编号分组汇总"""
+        sales_df = pd.DataFrame()
+        with get_connection() as conn:
+            # 获取指定年份的销售数据，按财务编号、客户名称、部门分组
+            sales_query = f'''
+                SELECT 
+                    finance_id,
+                    customer_name,
+                    department,
+                    SUM(amount) as year_amount,
+                    SUM(quantity) as year_quantity,
+                    COUNT(DISTINCT product_name) as unique_products,
+                    COUNT(*) as transaction_count,
+                    MAX(date('20' || substr('00' || year, -2) || '-' || 
+                          substr('00' || month, -2) || '-' || 
+                          substr('00' || day, -2))) as last_sale_date
+                FROM sales_records
+                WHERE finance_id IS NOT NULL 
+                    AND finance_id != '' 
+                    AND TRIM(finance_id) != ''
+                    AND year = '{year}'
+                GROUP BY finance_id, customer_name, department
+                ORDER BY finance_id, customer_name, department
+            '''
+            sales_df = pd.read_sql(sales_query, conn)
+            
+            if not sales_df.empty:
+                print(f"获取到 {year} 年销售数据: {len(sales_df)} 条记录")
+                
+                # 添加活跃度分类
+                sales_df['last_sale_date'] = pd.to_datetime(sales_df['last_sale_date'], errors='coerce')
+                current_date = pd.Timestamp.now()
+                sales_df['days_since_last_sale'] = (current_date - sales_df['last_sale_date']).dt.days
+                
+                def classify_activity(days):
+                    if pd.isna(days):
+                        return '无销售记录'
+                    elif days <= 30:
+                        return '活跃(30天内)'
+                    elif days <= 90:
+                        return '一般活跃(90天内)'
+                    elif days <= 180:
+                        return '低活跃(180天内)'
+                    elif days <= 365:
+                        return '休眠客户'
+                    else:
+                        return '一年内无销售'
+                
+                sales_df['销售活跃度'] = sales_df['days_since_last_sale'].apply(classify_activity)
+        
+        return sales_df
+    
     def get_integrated_customer_analysis(self, current_year=25):
-        """获取综合客户分析数据 - 简化版本"""
+        """获取综合客户分析数据 - 支持年度销售额"""
         # 1. 获取所有欠款数据
         debt_df = get_all_debt_data()
         print(f"欠款数据: {len(debt_df)} 条记录")
@@ -31,8 +84,8 @@ class SalesDebtIntegrationService:
                     COUNT(DISTINCT product_name) as unique_products,
                     COUNT(*) as transaction_count,
                     MAX(date('20' || substr('00' || year, -2) || '-' || 
-                          substr('00' || month, -2) || '-' || 
-                          substr('00' || day, -2))) as last_sale_date
+                        substr('00' || month, -2) || '-' || 
+                        substr('00' || day, -2))) as last_sale_date
                 FROM sales_records
                 WHERE finance_id IS NOT NULL 
                     AND finance_id != '' 
@@ -67,6 +120,40 @@ class SalesDebtIntegrationService:
                         return '一年内无销售'
                 
                 sales_df['销售活跃度'] = sales_df['days_since_last_sale'].apply(classify_activity)
+                
+                # 获取年度销售数据（复用现有数据过滤）
+                year_sales_query = f'''
+                    SELECT 
+                        finance_id,
+                        customer_name,
+                        department,
+                        SUM(amount) as year_amount
+                    FROM sales_records
+                    WHERE finance_id IS NOT NULL 
+                        AND finance_id != '' 
+                        AND TRIM(finance_id) != ''
+                        AND year = '{current_year}'
+                    GROUP BY finance_id, customer_name, department
+                '''
+                year_sales_df = pd.read_sql(year_sales_query, conn)
+                
+                # 将年度销售额合并到主销售数据
+                if not year_sales_df.empty:
+                    print(f"获取到 {current_year} 年销售数据: {len(year_sales_df)} 条记录")
+                    # 创建合并键
+                    year_sales_df['merge_key'] = year_sales_df['finance_id'].astype(str) + '|' + year_sales_df['customer_name'].astype(str) + '|' + year_sales_df['department'].astype(str)
+                    sales_df['merge_key'] = sales_df['finance_id'].astype(str) + '|' + sales_df['customer_name'].astype(str) + '|' + sales_df['department'].astype(str)
+                    
+                    # 合并年度销售额
+                    sales_df = sales_df.merge(
+                        year_sales_df[['merge_key', 'year_amount']],
+                        on='merge_key',
+                        how='left'
+                    )
+                    sales_df['year_amount'] = sales_df['year_amount'].fillna(0.0)
+                else:
+                    sales_df['year_amount'] = 0.0
+                    print(f"未找到 {current_year} 年销售数据")
         
         # 3. 基本数据清洗 - 只做最基本的处理
         def clean_data(df):
@@ -117,6 +204,7 @@ class SalesDebtIntegrationService:
                 if key not in sales_index:
                     sales_index[key] = {
                         'total_amount': float(row['total_amount']) if pd.notna(row['total_amount']) else 0.0,
+                        'year_amount': float(row['year_amount']) if pd.notna(row['year_amount']) else 0.0,
                         'total_quantity': int(row['total_quantity']) if pd.notna(row['total_quantity']) else 0,
                         'unique_products': int(row['unique_products']) if pd.notna(row['unique_products']) else 0,
                         'transaction_count': int(row['transaction_count']) if pd.notna(row['transaction_count']) else 0,
@@ -129,6 +217,7 @@ class SalesDebtIntegrationService:
                 else:
                     # 如果已存在，合并数据（理论上不应该出现）
                     sales_index[key]['total_amount'] += float(row['total_amount']) if pd.notna(row['total_amount']) else 0.0
+                    sales_index[key]['year_amount'] += float(row['year_amount']) if pd.notna(row['year_amount']) else 0.0
                     sales_index[key]['total_quantity'] += int(row['total_quantity']) if pd.notna(row['total_quantity']) else 0
                     # 产品种类取最大值
                     sales_index[key]['unique_products'] = max(
@@ -161,6 +250,7 @@ class SalesDebtIntegrationService:
                     '客户名称': debt_row.get('customer_name', ''),
                     '所属部门': department,
                     '总销售额': 0.0,
+                    f'20{current_year}销售额': 0.0,
                     '总销售量': 0,
                     '产品种类数': 0,
                     '交易次数': 0,
@@ -199,6 +289,7 @@ class SalesDebtIntegrationService:
                     '客户名称': best_customer_match,
                     '所属部门': department,
                     '总销售额': sales_match['total_amount'],
+                    f'20{current_year}销售额': sales_match['year_amount'],
                     '总销售量': sales_match['total_quantity'],
                     '产品种类数': sales_match['unique_products'],
                     '交易次数': sales_match['transaction_count'],
@@ -219,6 +310,7 @@ class SalesDebtIntegrationService:
                     '客户名称': debt_row.get('customer_name', ''),
                     '所属部门': department,
                     '总销售额': 0.0,
+                    f'20{current_year}销售额': 0.0,
                     '总销售量': 0,
                     '产品种类数': 0,
                     '交易次数': 0,
@@ -251,6 +343,11 @@ class SalesDebtIntegrationService:
         total_sales_calculated = merged_df['总销售额'].sum()
         print(f"计算的总销售额: ¥{total_sales_calculated:,.2f}")
         
+        # 计算年度销售额
+        year_sales_column = f'20{current_year}销售额'
+        year_sales_calculated = merged_df[year_sales_column].sum()
+        print(f"计算的{current_year}年销售额: ¥{year_sales_calculated:,.2f}")
+        
         # 直接从数据库获取实际总销售额
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -258,15 +355,24 @@ class SalesDebtIntegrationService:
             total_sales_actual = cursor.fetchone()[0] or 0
             print(f"数据库实际总销售额: ¥{total_sales_actual:,.2f}")
             
+            # 获取年度实际销售额
+            cursor.execute(f"SELECT SUM(amount) FROM sales_records WHERE year = '{current_year}'")
+            year_sales_actual = cursor.fetchone()[0] or 0
+            print(f"数据库{current_year}年实际销售额: ¥{year_sales_actual:,.2f}")
+            
             # 计算匹配率
             if total_sales_actual > 0:
                 match_rate = (total_sales_calculated / total_sales_actual) * 100
                 print(f"销售额匹配率: {match_rate:.2f}%")
+            
+            if year_sales_actual > 0:
+                year_match_rate = (year_sales_calculated / year_sales_actual) * 100
+                print(f"{current_year}年销售额匹配率: {year_match_rate:.2f}%")
         
         # 计算欠销比
         year_key = f'20{current_year}欠款'
         merged_df['欠销比'] = merged_df.apply(
-            lambda row: (row[year_key] / row['总销售额'] * 100) if row['总销售额'] > 0 else 0,
+            lambda row: (row[year_key] / row[year_sales_column] * 100) if row[year_sales_column] > 0 else 0,
             axis=1
         )
         
@@ -276,7 +382,7 @@ class SalesDebtIntegrationService:
         merged_df['风险等级'] = merged_df['风险评分'].apply(self._classify_risk)
         
         return merged_df
-    
+
     def _classify_customer(self, row):
         total_sales = row.get('总销售额', 0)
         debt_2025 = row.get('2025欠款', 0)
@@ -441,7 +547,6 @@ class SalesDebtIntegrationService:
                 finance_ids = [search_term]
             else:
                 # 没有财务编号匹配，尝试客户名称搜索
-                # 搜索销售记录
                 sales_name_search = '''
                     SELECT 
                         year, month, day, 

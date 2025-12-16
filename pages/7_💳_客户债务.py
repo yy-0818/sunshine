@@ -140,7 +140,6 @@ def get_column_config(year=25):
         "销售活跃度": st.column_config.TextColumn("销售活跃度", width="medium", help="基于最近交易时间的活跃度分类"),
         "客户综合等级": st.column_config.TextColumn("综合等级", width="medium", help="综合销售额、欠款和活跃度的客户等级"),
         "风险评分": st.column_config.NumberColumn("风险分", format="%.0f", help="0-100分，分数越高风险越低"),
-        "风险等级": st.column_config.TextColumn("风险等级", width="medium", help="基于风险评分的风险分类"),
         "最后销售日期": st.column_config.DateColumn("最后销售日期", format="YYYY-MM-DD", help="最近一次销售日期"),
         "交易次数": st.column_config.NumberColumn("交易次数", format="%d", help="累计交易次数"),
         "产品种类数": st.column_config.NumberColumn("产品种类", format="%d", help="购买过的产品种类数量"),
@@ -195,9 +194,14 @@ def get_integrated_data(integration_service, year=25):
         if integrated_df.empty:
             return integrated_df
         
-        # 由于历史销售数据只有2025年，所以2025销售额就是总销售额
+        # 现在已经有年度销售额数据，不需要额外处理
         year_sales_column = f'20{year}销售额'
-        integrated_df[year_sales_column] = integrated_df['总销售额']
+        
+        # 确保年度销售额列存在
+        if year_sales_column not in integrated_df.columns:
+            # 如果没有年度销售额数据，使用历史总销售额作为替代
+            print(f"警告: {year_sales_column} 列不存在，使用历史总销售额作为替代")
+            integrated_df[year_sales_column] = integrated_df['总销售额']
         
         return integrated_df
     except Exception as e:
@@ -477,26 +481,26 @@ def render_review_analysis_tab(integration_service):
         )
     
     with kpi5:
-        if '风险等级' in integrated_df.columns:
-            high_risk_mask = integrated_df['风险等级'].isin(['高风险', '较高风险'])
-            high_risk_customers = integrated_df[high_risk_mask].shape[0]
+        # 基于风险评分计算高风险客户（风险评分 < 40）
+        if '风险评分' in integrated_df.columns:
+            high_risk_customers = len(integrated_df[integrated_df['风险评分'] < 40])
             high_risk_ratio = (high_risk_customers / total_customers * 100) if total_customers > 0 else 0
             st.metric(
-                "风险客户",
+                "高风险客户",
                 f"{high_risk_customers:,}",
                 f"{high_risk_ratio:.1f}%",
                 delta_color="inverse",
-                help="高风险和较高风险客户数量"
+                help="风险评分低于40分的客户数量"
             )
         else:
-            st.metric("风险客户", "N/A", help="高风险和较高风险客户数量")
+            st.metric("高风险客户", "N/A", help="风险评分低于40分的客户数量")
     
     st.divider()
     
     st.subheader("📋 详细数据查看")
     
     with st.container(border=True):
-        col_filter1, col_filter2, col_filter3, col_filter4 = st.columns(4)
+        col_filter1, col_filter2, col_filter3 = st.columns(3)
         
         with col_filter1:
             search_term = st.text_input(
@@ -507,24 +511,6 @@ def render_review_analysis_tab(integration_service):
             )
         
         with col_filter2:
-            if '风险等级' in integrated_df.columns:
-                risk_options = integrated_df['风险等级'].unique().tolist()
-                # 使用自定义排序函数对风险等级进行排序
-                sorted_risk_options = sort_risk_levels(risk_options)
-                if sorted_risk_options:
-                    risk_selected = st.multiselect(
-                        "风险等级", 
-                        options=sorted_risk_options,
-                        placeholder="请选择风险等级..."
-                    )
-                else:
-                    risk_selected = []
-                    st.multiselect("风险等级", options=[], disabled=True, placeholder="无可用选项")
-            else:
-                risk_selected = []
-                st.multiselect("风险等级", options=[], disabled=True, placeholder="无数据")
-        
-        with col_filter3:
             if '客户综合等级' in integrated_df.columns:
                 grade_options = sorted(integrated_df['客户综合等级'].unique().tolist())
                 if grade_options:
@@ -540,7 +526,7 @@ def render_review_analysis_tab(integration_service):
                 grade_selected = []
                 st.multiselect("综合等级", options=[], disabled=True, placeholder="无数据")
         
-        with col_filter4:
+        with col_filter3:
             if '销售活跃度' in integrated_df.columns:
                 activity_options = integrated_df['销售活跃度'].unique().tolist()
                 # 使用自定义排序函数对销售活跃度进行排序
@@ -567,20 +553,17 @@ def render_review_analysis_tab(integration_service):
         )
         df_display = df_display[mask]
     
-    if risk_selected:
-        df_display = df_display[df_display['风险等级'].isin(risk_selected)]
-    
     if grade_selected:
         df_display = df_display[df_display['客户综合等级'].isin(grade_selected)]
     
     if activity_selected:
         df_display = df_display[df_display['销售活跃度'].isin(activity_selected)]
     
-    # 定义显示的列
+    # 定义显示的列（移除了风险等级列）
     base_columns = ['财务编号', '客户名称', '所属部门']
     sales_columns = [year_sales_column, '总销售额'] if year_sales_column in df_display.columns else ['总销售额']
     debt_columns = [debt_column, '欠销比'] if '欠销比' in df_display.columns else [debt_column]
-    analysis_columns = ['销售活跃度', '客户综合等级', '风险评分', '风险等级']
+    analysis_columns = ['销售活跃度', '客户综合等级', '风险评分']
     
     display_columns = base_columns + sales_columns + debt_columns + analysis_columns
     display_columns = [col for col in display_columns if col in df_display.columns]
@@ -754,7 +737,8 @@ def render_customer_detail_view(integration_service):
                             "department": st.column_config.TextColumn("部门", width="small")
                         },
                         hide_index=True,
-                        height=400
+                        height=400,
+                        width='stretch'
                     )
                     
                     st.caption(f"📊 共 {len(sales_df)} 条销售记录")
@@ -790,7 +774,8 @@ def render_customer_detail_view(integration_service):
                                 "debt_2024": st.column_config.NumberColumn("2024欠款", format="¥%.2f", width="medium"),
                                 "debt_2025": st.column_config.NumberColumn("2025欠款", format="¥%.2f", width="medium")
                             },
-                            hide_index=True
+                            hide_index=True,
+                            width='stretch'
                         )
                 else:
                     st.info("💰 暂无欠款记录")
@@ -937,7 +922,7 @@ def render_classification_help_tab():
         st.dataframe(
             styled_table,
             hide_index=True,
-            use_container_width=True,
+            width='stretch',
             height=280  # 紧凑高度
         )
         
@@ -1033,30 +1018,30 @@ def render_classification_help_tab():
                 "欠销比": "0%",
                 "最后交易": "30天前",
                 "计算过程": "100分 - 0 - 0 + 5 = 105分 → 100分",
-                "风险等级": "低风险"
+                "风险评分": "100分"
             },
             {
-                "案例": "高风险客户",
+                "案例": "中风险客户",
                 "当年销售额": "150,000元",
                 "当年欠款": "90,000元",
                 "欠销比": "60%",
                 "最后交易": "200天前",
                 "计算过程": "100 - 22 - 20 = 58分",
-                "风险等级": "中等风险"
+                "风险评分": "58分"
             },
             {
-                "案例": "纯欠款客户",
+                "案例": "高风险客户",
                 "当年销售额": "0元",
                 "当年欠款": "50,000元",
                 "欠销比": "100%",
                 "最后交易": "从未交易",
                 "计算过程": "100 - 50 - 30 = 20分",
-                "风险等级": "高风险"
+                "风险评分": "20分"
             }
         ]
         
         df_examples = pd.DataFrame(example_data)
-        st.dataframe(df_examples, hide_index=True, use_container_width=True)
+        st.dataframe(df_examples, hide_index=True, width='stretch')
     
     with tab_management:
         st.subheader("📋 分级管理策略")
@@ -1137,7 +1122,7 @@ def render_classification_help_tab():
         st.dataframe(
             styled_strategy,
             hide_index=True,
-            use_container_width=True,
+            width='stretch',
             height=220
         )
         
@@ -1145,27 +1130,27 @@ def render_classification_help_tab():
         st.markdown("### 📈 关键监控指标")
         
         monitor_data = [
-            {"监控周期": "日常", "重点关注": "D/E级客户新增、高风险欠款变化"},
+            {"监控周期": "日常", "重点关注": "高风险客户新增、风险评分异常变化"},
             {"监控周期": "每周", "重点关注": "欠销比异常波动、逾期账款清单"},
-            {"监控周期": "每月", "重点关注": "等级分布变化、平均欠销比趋势"},
+            {"监控周期": "每月", "重点关注": "等级分布变化、平均风险评分趋势"},
             {"监控周期": "每季", "重点关注": "分类标准调整、授信政策优化"}
         ]
         
         df_monitor = pd.DataFrame(monitor_data)
-        st.dataframe(df_monitor, hide_index=True, use_container_width=True)
+        st.dataframe(df_monitor, hide_index=True, width='stretch')
         
         # 紧急处理指南
         st.markdown("### 🚨 紧急处理指南")
         
         urgent_actions = [
-            {"情况": "C级客户欠销比>40%", "行动": "电话沟通了解情况，评估降级"},
-            {"情况": "B级客户连续3个月无交易", "行动": "客户经理主动拜访，了解需求"},
-            {"情况": "D级客户欠款逾期60天", "行动": "启动法律程序，停止发货"},
-            {"情况": "A级客户要求延长账期", "行动": "评估批准，监控后续表现"}
+            {"情况": "客户风险评分<40分", "行动": "电话沟通了解情况，评估风险"},
+            {"情况": "客户风险评分<60分且欠销比>40%", "行动": "客户经理主动拜访，了解需求"},
+            {"情况": "客户风险评分<20分且欠款逾期60天", "行动": "启动法律程序，停止发货"},
+            {"情况": "优质客户要求延长账期", "行动": "评估批准，监控后续表现"}
         ]
         
         df_urgent = pd.DataFrame(urgent_actions)
-        st.dataframe(df_urgent, hide_index=True, use_container_width=True)
+        st.dataframe(df_urgent, hide_index=True, width='stretch')
 
 # -----------------------------------------------------------------------------
 # 7. 主程序入口
