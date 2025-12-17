@@ -5,8 +5,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 from core.debt_service import DebtAnalysisService
 from core.customer_analysis import SalesDebtIntegrationService
-from core.database import get_connection
-from utils.auth import require_login
+from utils.auth import require_login, check_permission
 from utils.data_processor import process_debt_excel_data, validate_debt_data, get_sample_data
 
 # -----------------------------------------------------------------------------
@@ -24,6 +23,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# 检查管理员权限
+if not check_permission('admin'):
+    st.error("❌ 权限不足，需要管理员权限")
+    st.stop()
 
 # 专业的风险色阶 (背景色)
 RISK_COLORS = {
