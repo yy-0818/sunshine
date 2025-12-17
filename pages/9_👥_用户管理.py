@@ -10,6 +10,13 @@ st.set_page_config(
     layout="wide"
 )
 
+st.sidebar.markdown("### 🔧 快捷操作")
+# 退出登录
+if st.sidebar.button("🚪 退出登录", use_container_width=True):
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
 def main():
     require_login()
     
