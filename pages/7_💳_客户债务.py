@@ -245,7 +245,7 @@ def sort_activity_levels(levels):
 def render_data_import_tab(debt_service):
     """数据导入页面"""
     st.header("📥 数据导入中心")
-    st.caption("请上传符合格式的 Excel 文件以更新系统数据。")
+    st.caption("请上传符合格式的 Excel 文件以更新系统数据")
 
     col1, col2 = st.columns(2)
 
@@ -324,6 +324,8 @@ def render_data_import_tab(debt_service):
     with st.expander("📝 查看数据格式要求", expanded=False):
         st.markdown("""
         ### Excel文件格式要求
+                    
+        > 数据上传请注意对应接口，系统会自动添加部门(一期、二期)以便与销售数据关联
         
         **文件结构（必须包含以下列）：**
         | 列位置 | 列名 | 说明 | 示例 |
@@ -331,29 +333,27 @@ def render_data_import_tab(debt_service):
         | 第1列 | 客户代码 | 必须以2203开头 | `2203.413.001` |
         | 第2列 | 客户名称 | 客户全称 | `鑫帅辉-九方昌盛` |
         | 第3列 | 2023欠款 | 2023年欠款金额 | `5000.00` |
-        | 第6列 | 2024欠款 | 2024年欠款金额 | `3000.00` |
-        | 第9列 | 2025欠款 | 2025年欠款金额 | `0.00` |
+        | 第4列 | 2024欠款 | 2024年欠款金额 | `3000.00` |
+        | 第5列 | 2025欠款 | 2025年欠款金额 | `0.00` |
         
         **财务编号处理规则：**
         - `2203.413.001` → 自动处理为 `413-001`
-        - `2203-413-001` → 自动处理为 `413-001`
-        - `2203413001` → 自动处理为 `413-001`
         
-        **注意：系统会自动统一财务编号格式，确保与销售数据一致。**
+        **注意：1.系统会自动统一财务编号格式，确保与销售数据一致。**
         """)
         
-        st.markdown("### 示例数据格式：")
+        st.markdown("### 上传数据处理后示例：")
         sample_df = get_sample_data("二期")
         st.dataframe(sample_df, hide_index=True, width='stretch')
         
-        csv = sample_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📥 下载数据模板",
-            data=csv,
-            file_name="客户欠款数据模板.csv",
-            mime="text/csv",
-            help="下载标准格式的数据模板"
-        )
+        # csv = sample_df.to_csv(index=False).encode('utf-8-sig')
+        # st.download_button(
+        #     label="📥 下载数据模板",
+        #     data=csv,
+        #     file_name="客户欠款数据模板.csv",
+        #     mime="text/csv",
+        #     help="下载标准格式的数据模板"
+        # )
 
 # -----------------------------------------------------------------------------
 # 4. 复核分析视图
