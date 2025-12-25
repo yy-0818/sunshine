@@ -941,7 +941,7 @@ def render_classification_help_tab():
             st.caption("**风险评估**：")
             st.markdown("- <20%：低风险")
             st.markdown("- 20%-50%：中等风险")
-            st.markdown("- >50%：高风险")
+            st.markdown("- **50%：高风险**")
         
         with col_metric2:
             st.markdown("**销售活跃度 (Sales Activity)**")
@@ -950,7 +950,7 @@ def render_classification_help_tab():
             st.markdown("- **一般活跃(90天内)**：30-90天内有交易")
             st.markdown("- **低活跃(180天内)**：90-180天内有交易")
             st.markdown("- **休眠客户**：180-365天内有交易")
-            st.markdown("- **一年内无销售**：超过365天无交易")
+            # st.markdown("- **一年内无销售**：超过365天无交易")
     
     with tab_calculation:
         st.subheader("📐 核心计算模型")
