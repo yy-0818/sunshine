@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from core.analysis_service import AnalysisService
+from streamlit_echarts import st_echarts
 from core.database import get_connection
 from utils.auth import require_login
 
@@ -12,71 +10,301 @@ st.logo(
     icon_image='./assets/logo.png',
 )
 
-st.set_page_config(page_title="数据统计", layout="wide")
-st.title("📊 数据统计分析")
+st.set_page_config(
+    page_title="数据统计仪表板",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+st.title("📊 数据统计分析仪表板")
 
 require_login()
 
-# 初始化服务
-analysis_service = AnalysisService()
+# ==================== 样式和配置 ====================
+st.markdown("""
+<style>
+/* 侧边栏样式优化 */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+</style>
+""", unsafe_allow_html=True)
 
-# ==================== 通用组件函数优化 ====================
+# 现代商业配色方案
+COLOR_SCHEME = {
+    'primary': ['#4f46e5', '#7c3aed', '#a855f7', '#d946ef'],  # 紫色系
+    'success': ['#10b981', '#34d399', '#6ee7b7', '#a7f3d0'],  # 绿色系
+    'warning': ['#f59e0b', '#fbbf24', '#fcd34d', '#fde68a'],  # 橙色系
+    'danger': ['#ef4444', '#f87171', '#fca5a5', '#fecaca'],   # 红色系
+    'neutral': ['#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb'],  # 灰色系
+    'sequential': ['#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe']  # 蓝色渐变
+}
 
-def create_metric_card(label, value, delta=None, delta_color="normal"):
-    """创建统一的指标卡片"""
-    st.metric(label, value, delta=delta, delta_color=delta_color)
+# ==================== 优化的缓存函数 ====================
+@st.cache_data(ttl=300)
+def get_available_years():
+    """获取数据中存在的年份列表"""
+    try:
+        with get_connection() as conn:
+            df = pd.read_sql_query('''
+                SELECT year
+                FROM (
+                    SELECT DISTINCT CAST(strftime('%Y', record_date) as INTEGER) as year
+                    FROM sales_records
+                    WHERE record_date IS NOT NULL
+                    AND record_date != ''
+                )
+                ORDER BY year DESC
+            ''', conn)
+        years = df['year'].dropna().astype(int).tolist()
+        return ['全部年份'] + [str(year) for year in years]
+    except Exception as e:
+        st.error(f"获取年份列表失败: {str(e)}")
+        return ['全部年份']
 
-def create_pie_chart(df, values_col, names_col, title, color_map=None):
-    """创建饼图"""
-    if df.empty:
-        st.info("暂无数据")
-        return None
-        
-    fig = px.pie(
-        df, 
-        values=values_col, 
-        names=names_col,
-        title=title,
-        color=names_col,
-        color_discrete_map=color_map
-    )
-    fig.update_traces(
-        textposition='inside',
-        textinfo='percent+label',
-        hovertemplate='<b>%{label}</b><br>记录数: %{value}<br>占比: %{percent}'
-    )
-    fig.update_layout(
-        template="plotly_white",
-        showlegend=False,
-    )
-    return fig
+@st.cache_data(ttl=300)
+def get_department_list(year_filter):
+    """获取部门列表"""
+    try:
+        with get_connection() as conn:
+            if year_filter != "全部年份":
+                query = '''
+                    SELECT DISTINCT department
+                    FROM sales_records
+                    WHERE strftime('%Y', record_date) = ? 
+                        AND department IS NOT NULL 
+                        AND department != ''
+                    ORDER BY department
+                '''
+                params = [year_filter]
+            else:
+                query = '''
+                    SELECT DISTINCT department
+                    FROM sales_records
+                    WHERE department IS NOT NULL AND department != ''
+                    ORDER BY department
+                '''
+                params = []
+            
+            dept_list = pd.read_sql_query(query, conn, params=params)
+            return dept_list['department'].tolist() if not dept_list.empty else []
+    except Exception as e:
+        st.error(f"获取部门列表失败: {str(e)}")
+        return []
 
-def create_bar_chart(df, x_col, y_col, title, color_col=None, color_scale="Viridis", x_label=None, y_label=None):
-    """创建柱状图"""
-    if df.empty:
-        st.info("暂无数据")
-        return None
-    
-    fig = px.bar(
-        df,
-        x=x_col,
-        y=y_col,
-        title=title,
-        color=color_col if color_col else y_col,
-        color_continuous_scale=color_scale
-    )
-    
-    x_label = x_label or x_col
-    y_label = y_label or y_col
-    
-    fig.update_layout(
-        template="plotly_white",
-        xaxis_title=x_label,
-        yaxis_title=y_label,
-        xaxis_tickangle=-45,
-    )
-    return fig
+@st.cache_data(ttl=300, show_spinner="正在加载统计数据...")
+def get_cached_total_stats(year_filter):
+    """缓存总数统计数据"""
+    try:
+        with get_connection() as conn:
+            year_condition = ""
+            params = []
+            
+            if year_filter != "全部年份":
+                year_condition = "WHERE strftime('%Y', record_date) = ?"
+                params = [year_filter]
+            
+            # 使用单个查询获取所有统计数据
+            base_query = f'''
+                SELECT 
+                    COUNT(*) as total_records,
+                    COUNT(DISTINCT customer_name) as unique_customers,
+                    COUNT(DISTINCT product_name) as unique_products,
+                    COUNT(DISTINCT color) as unique_colors,
+                    COUNT(DISTINCT grade) as unique_grades,
+                    COALESCE(SUM(quantity), 0) as total_quantity,
+                    COALESCE(SUM(amount), 0) as total_amount,
+                    COALESCE(MIN(unit_price), 0) as min_price,
+                    COALESCE(MAX(unit_price), 0) as max_price,
+                    COALESCE(AVG(unit_price), 0) as avg_price,
+                    MIN(record_date) as earliest_date,
+                    MAX(record_date) as latest_date
+                FROM sales_records
+                {year_condition}
+            '''
+            
+            stats_df = pd.read_sql_query(base_query, conn, params=params)
+            
+            if stats_df.empty:
+                return get_default_stats()
+            
+            stats = stats_df.iloc[0].to_dict()
+            
+            # 添加日期范围
+            stats['date_range'] = {
+                'start': stats.get('earliest_date'),
+                'end': stats.get('latest_date')
+            }
+            
+            # 计算衍生指标
+            total_records = stats['total_records'] or 0
+            total_amount = stats['total_amount'] or 0
+            
+            # 只保留交易均额
+            stats['avg_transaction_amount'] = total_amount / total_records if total_records > 0 else 0
+            
+            return stats
+    except Exception as e:
+        st.error(f"加载总数统计失败: {str(e)}")
+        return get_default_stats()
 
+def get_default_stats():
+    """返回默认统计数据"""
+    return {
+        'total_records': 0,
+        'unique_customers': 0,
+        'unique_products': 0,
+        'unique_colors': 0,
+        'unique_grades': 0,
+        'total_quantity': 0,
+        'total_amount': 0,
+        'min_price': 0,
+        'max_price': 0,
+        'avg_price': 0,
+        'avg_transaction_amount': 0,
+        'date_range': {'start': None, 'end': None}
+    }
+
+@st.cache_data(ttl=300)
+def get_cached_department_stats(year_filter):
+    """缓存部门统计数据"""
+    try:
+        with get_connection() as conn:
+            year_condition = ""
+            params = []
+            if year_filter != "全部年份":
+                year_condition = "WHERE strftime('%Y', record_date) = ?"
+                params = [year_filter]
+            
+            dept_stats_query = f'''
+                SELECT 
+                    COALESCE(NULLIF(department, ''), '未分类') as department,
+                    COUNT(*) as record_count,
+                    ROUND(SUM(amount), 2) as total_amount,
+                    SUM(quantity) as total_quantity,
+                    ROUND(AVG(unit_price), 2) as avg_price
+                FROM sales_records
+                {year_condition}
+                GROUP BY COALESCE(NULLIF(department, ''), '未分类')
+                ORDER BY total_amount DESC
+            '''
+            dept_stats = pd.read_sql_query(dept_stats_query, conn, params=params)
+            
+            return {
+                'department_stats': dept_stats.to_dict('records'),
+                'total_records': int(dept_stats['record_count'].sum()) if not dept_stats.empty else 0,
+                'classified_records': int(dept_stats[dept_stats['department'] != '未分类']['record_count'].sum()) 
+                                     if not dept_stats.empty else 0,
+                'unclassified_records': int(dept_stats[dept_stats['department'] == '未分类']['record_count'].sum()) 
+                                       if not dept_stats.empty else 0
+            }
+    except Exception as e:
+        st.error(f"加载部门统计失败: {str(e)}")
+        return {'department_stats': [], 'total_records': 0, 'classified_records': 0, 'unclassified_records': 0}
+
+@st.cache_data(ttl=300)
+def get_cached_department_stats_detail(department, year_filter):
+    """获取部门详细统计"""
+    try:
+        with get_connection() as conn:
+            year_condition = ""
+            params = [department]
+            
+            if year_filter != "全部年份":
+                year_condition = "AND strftime('%Y', record_date) = ?"
+                params.append(year_filter)
+            
+            query = f'''
+                SELECT 
+                    COUNT(*) as total_records,
+                    COUNT(DISTINCT customer_name) as customer_count,
+                    COUNT(DISTINCT product_name) as product_count,
+                    COUNT(DISTINCT color) as color_count,
+                    COALESCE(SUM(quantity), 0) as total_quantity,
+                    COALESCE(SUM(amount), 0) as total_amount,
+                    COALESCE(AVG(unit_price), 0) as avg_price,
+                    MIN(record_date) as earliest_date,
+                    MAX(record_date) as latest_date
+                FROM sales_records
+                WHERE department = ? {year_condition}
+            '''
+            
+            result = pd.read_sql_query(query, conn, params=params)
+            
+            if result.empty:
+                return {
+                    'total_records': 0,
+                    'customer_count': 0,
+                    'product_count': 0,
+                    'color_count': 0,
+                    'total_quantity': 0,
+                    'total_amount': 0,
+                    'avg_price': 0,
+                    'date_range': {'start': None, 'end': None}
+                }
+            
+            row = result.iloc[0]
+            return {
+                'total_records': int(row['total_records']),
+                'customer_count': int(row['customer_count']),
+                'product_count': int(row['product_count']),
+                'color_count': int(row['color_count']),
+                'total_quantity': int(row['total_quantity']),
+                'total_amount': float(row['total_amount']),
+                'avg_price': float(row['avg_price']),
+                'date_range': {
+                    'start': row['earliest_date'],
+                    'end': row['latest_date']
+                }
+            }
+    except Exception as e:
+        st.error(f"加载部门详细统计失败: {str(e)}")
+        return {
+            'total_records': 0,
+            'customer_count': 0,
+            'product_count': 0,
+            'color_count': 0,
+            'total_quantity': 0,
+            'total_amount': 0,
+            'avg_price': 0,
+            'date_range': {'start': None, 'end': None}
+        }
+
+@st.cache_data(ttl=300)
+def get_cached_production_line_data(department, year_filter):
+    """获取部门生产线数据"""
+    try:
+        with get_connection() as conn:
+            year_condition = ""
+            params = [department]
+            
+            if year_filter != "全部年份":
+                year_condition = "AND strftime('%Y', record_date) = ?"
+                params.append(year_filter)
+            
+            query = f'''
+                SELECT 
+                    production_line,
+                    COUNT(*) as record_count,
+                    SUM(amount) as total_amount,
+                    SUM(quantity) as total_quantity,
+                    AVG(unit_price) as avg_price
+                FROM sales_records
+                WHERE department = ? {year_condition}
+                GROUP BY production_line
+                HAVING record_count > 0
+                ORDER BY record_count DESC
+                LIMIT 20
+            '''
+            
+            df = pd.read_sql_query(query, conn, params=params)
+            return df
+    except Exception as e:
+        st.error(f"获取生产线数据失败: {str(e)}")
+        return pd.DataFrame()
+
+# ==================== ECharts图表函数 ====================
 def format_chinese_month(month_str):
     """将YYYY-MM格式转换为中文月份格式"""
     try:
@@ -87,423 +315,896 @@ def format_chinese_month(month_str):
     except:
         return month_str
 
-def create_trend_comparison_chart(monthly_data, primary_col, secondary_col, title, 
-                                primary_name="销售额", secondary_name="交易次数",
-                                primary_color='#2563EB', secondary_color='rgba(16,185,129,0.4)'):
-    """创建趋势对比图 - 优化中文月份显示"""
+def create_echarts_line_bar_mix(monthly_data, title, primary_col, secondary_col, 
+                               primary_name="销售额", secondary_name="交易次数"):
+    """创建ECharts混合图表（折线+柱状）"""
     if monthly_data.empty or len(monthly_data) <= 1:
-        st.info("暂无足够的时间趋势数据")
         return None
-        
-    # 转换月份为中文格式
+    
     monthly_data = monthly_data.copy()
-    monthly_data['month_chinese'] = monthly_data['month'].apply(format_chinese_month)
+    months = [format_chinese_month(m) for m in monthly_data['month'].tolist()]
     
-    fig = go.Figure()
-    
-    # 主Y轴数据（折线图）
-    fig.add_trace(go.Scatter(
-        x=monthly_data['month_chinese'],
-        y=monthly_data[primary_col],
-        name=primary_name,
-        line=dict(color=primary_color, width=3),
-        line_shape='spline',
-        marker=dict(size=6),
-        hovertemplate=f'{primary_name}: %{{y:,.2f}}<extra></extra>'
-    ))
-    
-    # 次Y轴数据（柱状图）
-    fig.add_trace(go.Bar(
-        x=monthly_data['month_chinese'],
-        y=monthly_data[secondary_col],
-        name=secondary_name,
-        marker_color=secondary_color,
-        yaxis='y2',
-        hovertemplate=f'{secondary_name}: %{{y:,}}<extra></extra>'
-    ))
-    
-    fig.update_layout(
-        title=title,
-        template="plotly_white",
-        xaxis_title="月份",
-        yaxis_title=primary_name,
-        yaxis=dict(side='left', showgrid=False),
-        yaxis2=dict(title=secondary_name, overlaying='y', side='right', showgrid=False),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        hovermode='x unified',
-    )
-    return fig
-
-# ==================== 部门概览优化 ====================
-
-@st.cache_data(ttl=60)
-def get_cached_department_stats():
-    """缓存部门统计数据"""
-    with get_connection() as conn:
-        # 部门记录统计
-        dept_stats = pd.read_sql_query('''
-            SELECT 
-                CASE 
-                    WHEN department IS NULL OR department = '' THEN '未分类'
-                    ELSE department 
-                END as department,
-                COUNT(*) as record_count,
-                SUM(amount) as total_amount,
-                SUM(quantity) as total_quantity,
-                AVG(unit_price) as avg_price
-            FROM sales_records
-            GROUP BY department
-            ORDER BY record_count DESC
-        ''', conn)
-        
-        # 获取示例数据
-        unclassified_samples = pd.read_sql_query('''
-            SELECT 
-                production_line,
-                COUNT(*) as record_count
-            FROM sales_records
-            WHERE department IS NULL OR department = ''
-            GROUP BY production_line
-            ORDER BY record_count DESC
-            LIMIT 10
-        ''', conn)
-        
-        return {
-            'department_stats': dept_stats.to_dict('records'),
-            'unclassified_samples': unclassified_samples.to_dict('records'),
-            'total_records': dept_stats['record_count'].sum() if not dept_stats.empty else 0,
-            'classified_records': dept_stats[dept_stats['department'] != '未分类']['record_count'].sum() 
-                                 if not dept_stats.empty else 0,
-            'unclassified_records': dept_stats[dept_stats['department'] == '未分类']['record_count'].sum() 
-                                   if not dept_stats.empty else 0
-        }
-
-# ==================== 部门分析 ====================
-
-@st.cache_data(ttl=60)
-def get_cached_department_data(department):
-    """缓存部门数据"""
-    with get_connection() as conn:
-        query = '''
-            SELECT 
-                customer_name,
-                finance_id,
-                sub_customer_name,
-                product_name,
-                color,
-                grade,
-                quantity,
-                unit_price,
-                amount,
-                ticket_number,
-                remark,
-                production_line,
-                record_date
-            FROM sales_records
-            WHERE department = ?
-            ORDER BY record_date DESC
-        '''
-        df = pd.read_sql_query(query, conn, params=(department,))
-        return df
-
-@st.cache_data(ttl=60)
-def get_cached_department_stats(department):
-    """缓存部门统计数据"""
-    with get_connection() as conn:
-        stats = pd.read_sql_query('''
-            SELECT 
-                COUNT(*) as total_records,
-                COUNT(DISTINCT customer_name) as customer_count,
-                COUNT(DISTINCT product_name) as product_count,
-                COUNT(DISTINCT color) as color_count,
-                SUM(amount) as total_amount,
-                SUM(quantity) as total_quantity,
-                AVG(unit_price) as avg_price,
-                MIN(record_date) as start_date,
-                MAX(record_date) as end_date
-            FROM sales_records
-            WHERE department = ?
-        ''', conn, params=(department,))
-        
-        return {
-            'total_records': int(stats.iloc[0]['total_records']) if not stats.empty else 0,
-            'customer_count': int(stats.iloc[0]['customer_count']) if not stats.empty else 0,
-            'product_count': int(stats.iloc[0]['product_count']) if not stats.empty else 0,
-            'color_count': int(stats.iloc[0]['color_count']) if not stats.empty else 0,
-            'total_amount': float(stats.iloc[0]['total_amount']) if not stats.empty else 0,
-            'total_quantity': float(stats.iloc[0]['total_quantity']) if not stats.empty else 0,
-            'avg_price': float(stats.iloc[0]['avg_price']) if not stats.empty else 0,
-            'date_range': {
-                'start': str(stats.iloc[0]['start_date']) if not stats.empty and stats.iloc[0]['start_date'] else None,
-                'end': str(stats.iloc[0]['end_date']) if not stats.empty and stats.iloc[0]['end_date'] else None
+    option = {
+        "title": {
+            "text": title,
+            "left": "center",
+            "textStyle": {
+                "fontSize": 16,
+                "fontWeight": "bold",
+                "color": "#1f2937"
             }
-        }
-
-def render_department_metrics(dept_stats, department):
-    """渲染部门指标 - 优化布局"""
-    # 优化指标卡片布局
-    cols1 = st.columns(4)
-    metrics1 = [
-        ("总记录数", f"{dept_stats['total_records']:,}"),
-        ("客户数量", f"{dept_stats['customer_count']:,}"),
-        ("产品数量", f"{dept_stats['product_count']:,}"),
-        ("颜色种类", f"{dept_stats['color_count']:,}")
-    ]
-    
-    for col, (label, value) in zip(cols1, metrics1):
-        with col:
-            st.metric(label, value)
-    
-    cols2 = st.columns(4)
-    
-    # 优化时间范围显示
-    date_range_text = "暂无数据"
-    if dept_stats['date_range'] and dept_stats['date_range']['start']:
-        start_date = dept_stats['date_range']['start'][:10] if dept_stats['date_range']['start'] else "未知"
-        end_date = dept_stats['date_range']['end'][:10] if dept_stats['date_range']['end'] else "未知"
-        date_range_text = f"{start_date} 至 {end_date}"
-    
-    metrics2 = [
-        ("总金额", f"¥{dept_stats['total_amount']:,.2f}"),
-        ("总数量", f"{dept_stats['total_quantity']:,.0f}"),
-        ("平均价格", f"¥{dept_stats['avg_price']:.2f}"),
-        ("数据时间范围", date_range_text)
-    ]
-    
-    for col, (label, value) in zip(cols2, metrics2):
-        with col:
-            if label == "数据时间范围":
-                # 对于长文本字段，使用更简洁的显示方式
-                st.metric(label, value)
-            else:
-                create_metric_card(label, value)
-
-def render_production_line_analysis_by_dept(department):
-    """渲染部门生产线分析"""
-    with get_connection() as conn:
-        lines_df = pd.read_sql_query('''
-            SELECT 
-                production_line,
-                COUNT(*) as record_count,
-                SUM(amount) as total_amount,
-                SUM(quantity) as total_quantity,
-                AVG(unit_price) as avg_price
-            FROM sales_records
-            WHERE department = ?
-            GROUP BY production_line
-            HAVING record_count > 0
-            ORDER BY record_count DESC
-        ''', conn, params=(department,))
-    
-    if lines_df.empty:
-        st.info(f"{department}暂无生产线详细数据")
-        return
-        
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        fig_lines = create_bar_chart(
-            lines_df.nlargest(10, 'record_count'),
-            'production_line', 'record_count',
-            f"{department}生产线记录数TOP10",
-            x_label="生产线", y_label="记录数"
-        )
-        fig_lines.update_traces(
-            hovertemplate='<b>%{x}</b><br>记录数: %{y:,.2f}<extra></extra>'
-        )
-        if fig_lines:
-            st.plotly_chart(fig_lines, width='stretch')
-    
-    with col2:
-        if not lines_df.empty:
-            fig_amount = px.pie(
-                lines_df,
-                values='total_amount',
-                names='production_line',
-                title=f"{department}生产线销售额分布",
-                hole=0.4
-            )
-            fig_amount.update_traces(
-                textposition='inside', 
-                textinfo='percent+label',
-                hovertemplate='<b>%{label}</b><br>销售额: ¥%{value:,.2f}<br>占比: %{percent}<extra></extra>'
-            )
-            fig_amount.update_layout(
-                template="plotly_white", 
-                showlegend=False, 
-            )
-            st.plotly_chart(fig_amount, width='stretch')
-    
-    # 生产线详细数据表
-    st.subheader("📋 生产线详细数据")
-    display_lines = lines_df.copy()
-    display_lines['平均价格'] = display_lines['avg_price'].round(2)
-    display_lines['总金额'] = display_lines['total_amount'].round(2)
-    display_lines['总数量'] = display_lines['total_quantity'].round(0)
-    
-    st.dataframe(
-        display_lines[['production_line', 'record_count', '总数量', '平均价格', '总金额']],
-        column_config={
-            'production_line': st.column_config.TextColumn('生产线', width="medium"),
-            'record_count': st.column_config.NumberColumn('记录数', format="%d"),
-            '总数量': st.column_config.NumberColumn('总数量', format="%d"),
-            '平均价格': st.column_config.NumberColumn('平均价格', format="¥%.2f"),
-            '总金额': st.column_config.NumberColumn('总金额', format="¥%.2f")
         },
-        width='stretch',
-        hide_index=True
-    )
+        "tooltip": {
+            "trigger": "axis",
+            "axisPointer": {
+                "type": "cross",
+                "crossStyle": {
+                    "color": "#999"
+                }
+            }
+        },
+        "toolbox": {
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "magicType": {"show": True, "type": ["line", "bar"]},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "legend": {
+            "data": [primary_name, secondary_name],
+            "top": 30,
+            "textStyle": {
+                "fontSize": 12
+            }
+        },
+        "grid": {
+            "left": "3%",
+            "right": "4%",
+            "bottom": "3%",
+            "top": "15%",
+            "containLabel": True
+        },
+        "xAxis": [
+            {
+                "type": "category",
+                "data": months,
+                "axisPointer": {
+                    "type": "shadow"
+                },
+                "axisLabel": {
+                    "rotate": 45,
+                    "fontSize": 11
+                }
+            }
+        ],
+        "yAxis": [
+            {
+                "type": "value",
+                "name": primary_name,
+                "min": 0,
+                "position": "left",
+                "axisLine": {
+                    "show": True,
+                    "lineStyle": {
+                        "color": COLOR_SCHEME['primary'][0]
+                    }
+                },
+                "axisLabel": {
+                    "formatter": "¥{value}"
+                }
+            },
+            {
+                "type": "value",
+                "name": secondary_name,
+                "min": 0,
+                "position": "right",
+                "axisLine": {
+                    "show": True,
+                    "lineStyle": {
+                        "color": COLOR_SCHEME['success'][0]
+                    }
+                },
+                "splitLine": {
+                    "show": False
+                }
+            }
+        ],
+        "series": [
+            {
+                "name": primary_name,
+                "type": "line",
+                "yAxisIndex": 0,
+                "data": monthly_data[primary_col].round(2).tolist(),
+                "itemStyle": {
+                    "color": COLOR_SCHEME['primary'][0]
+                },
+                "lineStyle": {
+                    "width": 3
+                },
+                "symbolSize": 8,
+                "smooth": True,
+                "emphasis": {
+                    "focus": "series"
+                }
+            },
+            {
+                "name": secondary_name,
+                "type": "bar",
+                "yAxisIndex": 1,
+                "data": monthly_data[secondary_col].astype(int).tolist(),
+                "itemStyle": {
+                    "color": {
+                        "type": "linear",
+                        "x": 0,
+                        "y": 0,
+                        "x2": 0,
+                        "y2": 1,
+                        "colorStops": [{
+                            "offset": 0,
+                            "color": COLOR_SCHEME['success'][0]
+                        }, {
+                            "offset": 1,
+                            "color": COLOR_SCHEME['success'][2]
+                        }]
+                    }
+                },
+                "emphasis": {
+                    "focus": "series"
+                }
+            }
+        ],
+        "dataZoom": [
+            {
+                "type": "inside",
+                "start": 0,
+                "end": 100
+            },
+            {
+                "show": True,
+                "type": "slider",
+                "top": "90%",
+                "start": 0,
+                "end": 100
+            }
+        ]
+    }
+    
+    return option
 
-def render_department_trend_analysis(department):
-    """渲染部门趋势分析 - 优化中文月份显示"""
-    with get_connection() as conn:
-        monthly_trend = pd.read_sql_query('''
-            SELECT 
-                strftime('%Y-%m', record_date) as month,
-                COUNT(*) as transaction_count,
-                SUM(amount) as total_amount,
-                AVG(unit_price) as avg_price,
-                SUM(quantity) as total_quantity
-            FROM sales_records
-            WHERE department = ?
-            GROUP BY strftime('%Y-%m', record_date)
-            ORDER BY month
-        ''', conn, params=(department,))
+def create_echarts_pie_chart(data, value_col, name_col, title, radius=['40%', '70%']):
+    """创建ECharts饼图"""
+    if data.empty:
+        return None
+    
+    chart_data = []
+    for _, row in data.iterrows():
+        chart_data.append({
+            "value": float(row[value_col]),
+            "name": str(row[name_col])
+        })
+    
+    option = {
+        "title": {
+            "text": title,
+            "left": "center",
+            "textStyle": {
+                "fontSize": 16,
+                "fontWeight": "bold"
+            }
+        },
+        "tooltip": {
+            "trigger": "item",
+            "formatter": "{b}: ¥{c} ({d}%)"
+        },
+        "legend": {
+            "orient": "vertical",
+            # "left": "left",
+            "right": "right",
+            "top": "middle"
+        },
+        "series": [
+            {
+                "name": title,
+                "type": "pie",
+                "radius": radius,
+                "data": chart_data,
+                "emphasis": {
+                    "itemStyle": {
+                        "shadowBlur": 10,
+                        "shadowOffsetX": 0,
+                        "shadowColor": "rgba(0, 0, 0, 0.5)"
+                    }
+                },
+                "itemStyle": {
+                    "borderRadius": 8,
+                    "borderColor": "#fff",
+                    "borderWidth": 2
+                },
+                "label": {
+                    "formatter": "{b}: {d}%"
+                }
+            }
+        ]
+    }
+    
+    return option
 
-    if not monthly_trend.empty and len(monthly_trend) > 1:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig_trend = create_trend_comparison_chart(
-                monthly_trend, 'total_amount', 'transaction_count',
-                f"📊 {department}销售额 vs 交易量 时间对比趋势",
-                "销售额", "交易次数",
-                primary_color="rgba(138, 92, 246, .85)", secondary_color='rgba(6, 214, 160, .7)'
-            )
-            if fig_trend:
-                st.plotly_chart(fig_trend, width='stretch')
-        
-        with col2:
-            fig_price_qty = create_trend_comparison_chart(
-                monthly_trend, 'avg_price', 'total_quantity',
-                f"📦 {department}平均单价 vs 销售数量 趋势变化",
-                "平均单价", "销售数量",
-                primary_color='rgba(239, 71, 111, .85)', secondary_color='rgba(17, 138, 178, .7)'
-            )
-            if fig_price_qty:
-                st.plotly_chart(fig_price_qty, width='stretch')
-        
-        # 月度详细数据
-        with st.expander("📈 查看月度详细数据"):
-            display_monthly = monthly_trend.copy()
-            display_monthly['月份'] = display_monthly['month'].apply(format_chinese_month)
-            display_monthly['交易次数'] = display_monthly['transaction_count']
-            display_monthly['总金额'] = display_monthly['total_amount'].round(2)
-            display_monthly['平均价格'] = display_monthly['avg_price'].round(2)
-            display_monthly['总数量'] = display_monthly['total_quantity']
-            
-            st.dataframe(
-                display_monthly[['月份', '交易次数', '总金额', '平均价格', '总数量']],
-                width='stretch',
-                hide_index=True
-            )
-    else:
-        st.info(f"{department}暂无足够的时间趋势数据")
+def create_echarts_bar_chart(data, x_col, y_col, title, color_scheme='primary'):
+    """创建ECharts柱状图"""
+    if data.empty:
+        return None
+    
+    x_data = data[x_col].tolist()
+    y_data = data[y_col].round(2).tolist()
+    
+    option = {
+        "title": {
+            "text": title,
+            "left": "center",
+            "textStyle": {
+                "fontSize": 16,
+                "fontWeight": "bold"
+            }
+        },
+        "tooltip": {
+            "trigger": "axis",
+            "axisPointer": {
+                "type": "shadow"
+            },
+            "formatter": "{b}: {c}"
+        },
+        "grid": {
+            "left": "3%",
+            "right": "4%",
+            "bottom": "3%",
+            "top": "15%",
+            "containLabel": True
+        },
+        "xAxis": {
+            "type": "category",
+            "data": x_data,
+            "axisTick": {
+                "alignWithLabel": True
+            },
+            "axisLabel": {
+                "rotate": 45,
+                "fontSize": 11
+            }
+        },
+        "yAxis": {
+            "type": "value",
+            "name": "数量",
+            "axisLine": {
+                "show": True
+            }
+        },
+        "series": [
+            {
+                "name": title,
+                "type": "bar",
+                "barWidth": "60%",
+                "data": y_data,
+                "itemStyle": {
+                    "color": {
+                        "type": "linear",
+                        "x": 0,
+                        "y": 0,
+                        "x2": 0,
+                        "y2": 1,
+                        "colorStops": [{
+                            "offset": 0,
+                            "color": COLOR_SCHEME[color_scheme][0]
+                        }, {
+                            "offset": 1,
+                            "color": COLOR_SCHEME[color_scheme][2]
+                        }]
+                    }
+                },
+                "emphasis": {
+                    "itemStyle": {
+                        "shadowBlur": 10,
+                        "shadowOffsetX": 0,
+                        "shadowColor": "rgba(0, 0, 0, 0.5)"
+                    }
+                }
+            }
+        ]
+    }
+    
+    return option
 
-def create_department_analysis_tab(department):
-    """创建部门分析选项卡内容"""
+# ==================== 优化的总数分析组件 ====================
+def render_total_metrics_optimized(stats):
+    """渲染优化的总数分析指标"""
+    # 使用Streamlit原生metric组件
+    st.markdown("### 📈 核心业务指标")
+    
+    cols = st.columns(4)
+    with cols[0]:
+        st.metric("总记录数", f"{int(stats['total_records']):,}")
+    with cols[1]:
+        st.metric("总销售额", f"¥{int(stats['total_amount']):,}")
+    with cols[2]:
+        st.metric("客户总数", f"{int(stats['unique_customers']):,}")
+    with cols[3]:
+        st.metric("产品总数", f"{int(stats['unique_products']):,}")
+    
+    # 第二行指标
+    cols2 = st.columns(4)
+    with cols2[0]:
+        date_range_text = "暂无数据"
+        if stats['date_range'] and stats['date_range']['start']:
+            start = stats['date_range']['start'][:10] if stats['date_range']['start'] else "未知"
+            end = stats['date_range']['end'][:10] if stats['date_range']['end'] else "未知"
+            date_range_text = f"{start} 至 {end}"
+        st.metric("交易时间范围", date_range_text)
+    with cols2[1]:
+        st.metric("总销售量", f"{int(stats['total_quantity']):,}")
+    with cols2[2]:
+        st.metric("颜色种类", f"{int(stats['unique_colors']):,}")
+    with cols2[3]:
+        st.metric("平均单价", f"¥{stats['avg_price']:,.2f}")
+
+def render_total_analysis_optimized(year_filter):
+    """渲染优化的总数分析"""
     try:
-        # 获取部门数据
-        dept_data = get_cached_department_data(department)
-        dept_stats = get_cached_department_stats(department)
+        # 获取统计数据
+        stats = get_cached_total_stats(year_filter)
         
-        if dept_data.empty:
-            st.warning(f"⚠️ {department}暂无数据")
+        if stats['total_records'] == 0:
+            st.warning(f"⚠️ {year_filter if year_filter != '全部年份' else ''}暂无数据")
             return
         
-        # 部门概览指标
+        # 标题
+        # if year_filter != "全部年份":
+        #     st.markdown(f"## 📊 {year_filter}年总体业务分析")
+        # else:
+        #     st.markdown("## 📊 总体业务分析（全部年份）")
+        
+        # 关键指标概览
+        render_total_metrics_optimized(stats)
+        
+        # 部门销售额分析
+        st.markdown("### 🏢 部门业绩分析")
+        
+        dept_data = get_cached_department_stats(year_filter)
+        if dept_data['department_stats']:
+            dept_df = pd.DataFrame(dept_data['department_stats'])
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 部门销售额对比")
+                if not dept_df.empty:
+                    option = create_echarts_bar_chart(
+                        dept_df.head(10), 'department', 'total_amount',
+                        "部门销售额排名", 'primary'
+                    )
+                    if option:
+                        st_echarts(option, height=400)
+            
+            with col2:
+                st.markdown("#### 部门销售占比")
+                filtered_dept = dept_df[dept_df['department'] != '未分类']
+                if not filtered_dept.empty:
+                    option = create_echarts_pie_chart(
+                        filtered_dept, 'total_amount', 'department',
+                        "部门销售额占比", ['30%', '75%']
+                    )
+                    if option:
+                        st_echarts(option, height=400)
+        
+        # 时间趋势分析
+        st.markdown("### 📅 业务趋势分析")
+        
+        with get_connection() as conn:
+            year_condition = ""
+            params = []
+            
+            if year_filter != "全部年份":
+                year_condition = "WHERE strftime('%Y', record_date) = ?"
+                params = [year_filter]
+            
+            trend_query = f'''
+                SELECT 
+                    strftime('%Y-%m', record_date) as month,
+                    COUNT(*) as transaction_count,
+                    ROUND(SUM(amount), 2) as total_amount,
+                    ROUND(AVG(unit_price), 2) as avg_price,
+                    SUM(quantity) as total_quantity
+                FROM sales_records
+                {year_condition}
+                GROUP BY strftime('%Y-%m', record_date)
+                HAVING month IS NOT NULL AND month != ''
+                ORDER BY month
+            '''
+            monthly_trend = pd.read_sql_query(trend_query, conn, params=params)
+        
+        if not monthly_trend.empty and len(monthly_trend) > 1:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                option1 = create_echarts_line_bar_mix(
+                    monthly_trend, 
+                    "📊 销售额 vs 交易量趋势",
+                    'total_amount', 'transaction_count',
+                    "销售额", "交易次数"
+                )
+                if option1:
+                    st_echarts(option1, height=400)
+            
+            with col2:
+                option2 = create_echarts_line_bar_mix(
+                    monthly_trend,
+                    "📦 平均单价 vs 销售数量趋势",
+                    'avg_price', 'total_quantity',
+                    "平均单价", "销售数量"
+                )
+                if option2:
+                    st_echarts(option2, height=400)
+            
+            # 月度详细数据表格
+            with st.expander("📈 月度详细数据", expanded=False):
+                display_monthly = monthly_trend.copy()
+                display_monthly['月份'] = display_monthly['month'].apply(format_chinese_month)
+                display_monthly['交易次数'] = display_monthly['transaction_count']
+                display_monthly['总金额'] = display_monthly['total_amount'].round(2)
+                display_monthly['平均价格'] = display_monthly['avg_price'].round(2)
+                display_monthly['总数量'] = display_monthly['total_quantity']
+                
+                st.dataframe(
+                    display_monthly[['月份', '交易次数', '总金额', '平均价格', '总数量']],
+                    width='stretch',
+                    hide_index=True
+                )
+        else:
+            st.info("暂无足够的时间趋势数据")
+        
+        # 客户分析
+        st.markdown("### 👥 客户价值分析")
+        
+        with get_connection() as conn:
+            year_condition = ""
+            params = []
+            
+            if year_filter != "全部年份":
+                year_condition = "WHERE strftime('%Y', record_date) = ?"
+                params = [year_filter]
+            
+            customer_query = f'''
+                SELECT 
+                    customer_name,
+                    COUNT(DISTINCT color) as product_colors,
+                    COUNT(*) as transaction_count,
+                    ROUND(SUM(amount), 2) as total_amount,
+                    ROUND(AVG(unit_price), 2) as avg_price
+                FROM sales_records
+                {year_condition}
+                GROUP BY customer_name
+                HAVING total_amount > 0
+                ORDER BY total_amount DESC
+                LIMIT 20
+            '''
+            customer_stats = pd.read_sql_query(customer_query, conn, params=params)
+        
+        if not customer_stats.empty:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 🏆 TOP客户销售额")
+                top_customers = customer_stats.head(10)
+                
+                option = create_echarts_bar_chart(
+                    top_customers, 'customer_name', 'total_amount',
+                    "TOP客户销售额", 'primary'
+                )
+                if option:
+                    st_echarts(option, height=400)
+            
+            with col2:
+                # 客户价值分析表格
+                st.markdown("#### 💬 客户详情统计")
+                display_customers = customer_stats.copy()
+                display_customers = display_customers.rename(columns={
+                    'customer_name': '客户名称',
+                    'total_amount': '总金额',
+                    'transaction_count': '交易次数',
+                    'product_colors': '产品颜色数',
+                    'avg_price': '平均单价'
+                })
+                
+                st.dataframe(
+                    display_customers[['客户名称', '总金额', '交易次数', '产品颜色数', '平均单价']],
+                    width='stretch',
+                    hide_index=True
+                )
+        
+        # 产品分析
+        st.markdown("### 🏺 产品表现分析")
+        
+        with get_connection() as conn:
+            year_condition = ""
+            params = []
+            
+            if year_filter != "全部年份":
+                year_condition = "WHERE strftime('%Y', record_date) = ?"
+                params = [year_filter]
+            
+            product_query = f'''
+                SELECT 
+                    product_name,
+                    color,
+                    COALESCE(NULLIF(grade, ''), '无等级') as grade,
+                    COUNT(*) as transaction_count,
+                    ROUND(AVG(unit_price), 2) as avg_price,
+                    SUM(quantity) as total_quantity,
+                    ROUND(SUM(amount), 2) as total_amount
+                FROM sales_records
+                {year_condition}
+                GROUP BY product_name, color, grade
+                HAVING total_amount > 0
+                ORDER BY total_amount DESC
+                LIMIT 25
+            '''
+            product_stats = pd.read_sql_query(product_query, conn, params=params)
+        
+        if not product_stats.empty:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 🔥 热销产品TOP10")
+                top_products = product_stats.head(10)
+                top_products['product_display'] = top_products.apply(
+                    lambda x: f"{x['product_name']} - {x['color']}", axis=1
+                )
+                
+                option = create_echarts_bar_chart(
+                    top_products, 'product_display', 'total_amount',
+                    "热销产品销售额", 'danger'
+                )
+                if option:
+                    st_echarts(option, height=400)
+            
+            with col2:
+                # 产品价格分析表格
+                st.markdown("#### 📊 产品价格统计")
+                display_products = product_stats.copy()
+                display_products = display_products.rename(columns={
+                    'product_name': '产品名称',
+                    'color': '颜色',
+                    'grade': '等级',
+                    'total_amount': '总金额',
+                    'transaction_count': '交易次数',
+                    'total_quantity': '总数量',
+                    'avg_price': '平均单价'
+                })
+                
+                st.dataframe(
+                    display_products[['产品名称', '颜色', '等级', '总金额', '交易次数', '总数量', '平均单价']],
+                    width='stretch',
+                    hide_index=True
+                )
+        
+        # 数据导出
+        st.markdown("### 💾 数据导出")
+        cols = st.columns(4)
+        
+        with cols[0]:
+            if 'monthly_trend' in locals() and not monthly_trend.empty:
+                csv_monthly = monthly_trend.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📈 导出月度趋势",
+                    data=csv_monthly,
+                    file_name=f"月度趋势_{year_filter}.csv",
+                    mime="text/csv",
+                    width='stretch'
+                )
+        
+        with cols[1]:
+            if 'customer_stats' in locals() and not customer_stats.empty:
+                csv_customer = customer_stats.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="👥 导出客户分析",
+                    data=csv_customer,
+                    file_name=f"客户分析_{year_filter}.csv",
+                    mime="text/csv",
+                    width='stretch'
+                )
+        
+        with cols[2]:
+            if 'product_stats' in locals() and not product_stats.empty:
+                csv_product = product_stats.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="🏺 导出产品分析",
+                    data=csv_product,
+                    file_name=f"产品分析_{year_filter}.csv",
+                    mime="text/csv",
+                    width='stretch'
+                )
+        
+        with cols[3]:
+            summary_data = {
+                '指标': ['总记录数', '总销售额', '客户总数', '产品总数', '平均单价', '交易均额'],
+                '数值': [
+                    stats['total_records'],
+                    stats['total_amount'],
+                    stats['unique_customers'],
+                    stats['unique_products'],
+                    stats['avg_price'],
+                    stats['avg_transaction_amount']
+                ]
+            }
+            summary_df = pd.DataFrame(summary_data)
+            csv_summary = summary_df.to_csv(index=False, encoding='utf-8-sig')
+            st.download_button(
+                label="📊 导出指标摘要",
+                data=csv_summary,
+                file_name=f"指标摘要_{year_filter}.csv",
+                mime="text/csv",
+                width='stretch'
+            )
+                
+    except Exception as e:
+        st.error(f"获取统计数据时出错: {str(e)}")
+        st.info("请确保已正确导入数据并初始化数据库")
+
+def create_department_analysis_tab_optimized(department, year_filter):
+    """创建优化的部门分析选项卡内容"""
+    try:
+        # 获取部门详细数据
+        with get_connection() as conn:
+            year_condition = ""
+            params = [department]
+            
+            if year_filter != "全部年份":
+                year_condition = "AND strftime('%Y', record_date) = ?"
+                params.append(year_filter)
+            
+            # 部门统计数据
+            stats_query = f'''
+                SELECT 
+                    COUNT(*) as total_records,
+                    COUNT(DISTINCT customer_name) as customer_count,
+                    COUNT(DISTINCT product_name) as product_count,
+                    COUNT(DISTINCT color) as color_count,
+                    COALESCE(SUM(quantity), 0) as total_quantity,
+                    COALESCE(SUM(amount), 0) as total_amount,
+                    COALESCE(AVG(unit_price), 0) as avg_price,
+                    MIN(record_date) as earliest_date,
+                    MAX(record_date) as latest_date
+                FROM sales_records
+                WHERE department = ? {year_condition}
+            '''
+            
+            result = pd.read_sql_query(stats_query, conn, params=params)
+            
+            if result.empty or result.iloc[0]['total_records'] == 0:
+                st.warning(f"⚠️ {department}暂无{year_filter if year_filter != '全部年份' else ''}数据")
+                return
+            
+            dept_stats = {
+                'total_records': int(result.iloc[0]['total_records']),
+                'customer_count': int(result.iloc[0]['customer_count']),
+                'product_count': int(result.iloc[0]['product_count']),
+                'color_count': int(result.iloc[0]['color_count']),
+                'total_quantity': int(result.iloc[0]['total_quantity']),
+                'total_amount': float(result.iloc[0]['total_amount']),
+                'avg_price': float(result.iloc[0]['avg_price']),
+                'date_range': {
+                    'start': result.iloc[0]['earliest_date'],
+                    'end': result.iloc[0]['latest_date']
+                }
+            }
+        
+        # 部门标题
+        if year_filter != "全部年份":
+            st.markdown(f"## 📊 {department} - {year_filter}年分析")
+        else:
+            st.markdown(f"## 📊 {department} - 全部年份分析")
+        
+        # 关键指标
         st.subheader(f"📈 {department}关键指标")
-        render_department_metrics(dept_stats, department)
+        
+        cols = st.columns(4)
+        with cols[0]:
+            st.metric("总记录数", f"{dept_stats['total_records']:,}")
+        with cols[1]:
+            st.metric("客户数量", f"{dept_stats['customer_count']:,}")
+        with cols[2]:
+            st.metric("产品数量", f"{dept_stats['product_count']:,}")
+        with cols[3]:
+            st.metric("颜色种类", f"{dept_stats['color_count']:,}")
+        
+        cols2 = st.columns(4)
+        with cols2[0]:
+            st.metric("总金额", f"¥{int(dept_stats['total_amount']):,}")
+        with cols2[1]:
+            st.metric("总数量", f"{dept_stats['total_quantity']:,}")
+        with cols2[2]:
+            st.metric("平均价格", f"¥{dept_stats['avg_price']:.2f}")
+        with cols2[3]:
+            date_range_text = "暂无数据"
+            if dept_stats['date_range'] and dept_stats['date_range']['start']:
+                start = dept_stats['date_range']['start'][:10]
+                end = dept_stats['date_range']['end'][:10]
+                date_range_text = f"{start} 至 {end}"
+            st.metric("数据周期", date_range_text)
         
         # 生产线详细分析
         st.markdown("---")
         st.subheader("🏭 生产线详细分析")
-        render_production_line_analysis_by_dept(department)
+        
+        production_data = get_cached_production_line_data(department, year_filter)
+        
+        if not production_data.empty:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 生产线记录数TOP10")
+                top_lines = production_data.nlargest(10, 'record_count')
+                option = create_echarts_bar_chart(
+                    top_lines, 'production_line', 'record_count',
+                    f"{department}生产线记录数TOP10", 'warning'
+                )
+                if option:
+                    st_echarts(option, height=400)
+            
+            with col2:
+                st.markdown("#### 生产线销售额分布")
+                option = create_echarts_pie_chart(
+                    production_data, 'total_amount', 'production_line',
+                    f"{department}生产线销售额分布", ['30%', '75%']
+                )
+                if option:
+                    st_echarts(option, height=400)
+            
+            # 生产线详细数据表
+            # st.markdown("#### 📋 生产线详细数据")
+            with st.expander("💬 查看客户详情统计", expanded=False):
+                display_lines = production_data.copy()
+                display_lines = display_lines.rename(columns={
+                    'production_line': '生产线',
+                    'record_count': '记录数',
+                    'total_amount': '总金额',
+                    'total_quantity': '总数量',
+                    'avg_price': '平均价格'
+                })
+                
+                st.dataframe(
+                    display_lines[['生产线', '记录数', '总数量', '平均价格', '总金额']],
+                    width='stretch',
+                    hide_index=True
+                )
         
         # 时间趋势分析
         st.markdown("---")
         st.subheader("📅 时间趋势分析")
-        render_department_trend_analysis(department)
+        
+        with get_connection() as conn:
+            year_condition = ""
+            params = [department]
+            
+            if year_filter != "全部年份":
+                year_condition = "AND strftime('%Y', record_date) = ?"
+                params.append(year_filter)
+            
+            trend_query = f'''
+                SELECT 
+                    strftime('%Y-%m', record_date) as month,
+                    COUNT(*) as transaction_count,
+                    ROUND(SUM(amount), 2) as total_amount,
+                    ROUND(AVG(unit_price), 2) as avg_price,
+                    SUM(quantity) as total_quantity
+                FROM sales_records
+                WHERE department = ? {year_condition}
+                GROUP BY strftime('%Y-%m', record_date)
+                HAVING month IS NOT NULL AND month != ''
+                ORDER BY month
+            '''
+            monthly_trend = pd.read_sql_query(trend_query, conn, params=params)
+        
+        if not monthly_trend.empty and len(monthly_trend) > 1:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                option1 = create_echarts_line_bar_mix(
+                    monthly_trend, 
+                    f"📊 {department}销售额 vs 交易量趋势",
+                    'total_amount', 'transaction_count',
+                    "销售额", "交易次数"
+                )
+                if option1:
+                    st_echarts(option1, height=400)
+            
+            with col2:
+                option2 = create_echarts_line_bar_mix(
+                    monthly_trend,
+                    f"📦 {department}平均单价 vs 销售数量趋势",
+                    'avg_price', 'total_quantity',
+                    "平均单价", "销售数量"
+                )
+                if option2:
+                    st_echarts(option2, height=400)
+            
+            # 月度详细数据
+            with st.expander("📈 月度详细数据", expanded=False):
+                display_monthly = monthly_trend.copy()
+                display_monthly['月份'] = display_monthly['month'].apply(format_chinese_month)
+                display_monthly['交易次数'] = display_monthly['transaction_count']
+                display_monthly['总金额'] = display_monthly['total_amount'].round(2)
+                display_monthly['平均价格'] = display_monthly['avg_price'].round(2)
+                display_monthly['总数量'] = display_monthly['total_quantity']
+                
+                st.dataframe(
+                    display_monthly[['月份', '交易次数', '总金额', '平均价格', '总数量']],
+                    width='stretch',
+                    hide_index=True
+                )
         
         # 产品分析
         st.markdown("---")
         st.subheader("🏺 产品分析")
         
-        if not dept_data.empty:
-            # 产品统计
-            product_stats = dept_data.groupby(['product_name', 'color']).agg({
-                'amount': 'sum',
-                'quantity': 'sum',
-                'unit_price': 'mean',
-                'customer_name': 'count'
-            }).reset_index()
-            product_stats.columns = ['product_name', 'color', 'total_amount', 'total_quantity', 'avg_price', 'transaction_count']
-            product_stats = product_stats.sort_values('total_amount', ascending=False)
+        with get_connection() as conn:
+            year_condition = ""
+            params = [department]
             
-            if not product_stats.empty:
-                col1, col2 = st.columns(2)
+            if year_filter != "全部年份":
+                year_condition = "AND strftime('%Y', record_date) = ?"
+                params.append(year_filter)
+            
+            product_query = f'''
+                SELECT 
+                    product_name,
+                    color,
+                    COUNT(*) as transaction_count,
+                    ROUND(AVG(unit_price), 2) as avg_price,
+                    SUM(quantity) as total_quantity,
+                    ROUND(SUM(amount), 2) as total_amount
+                FROM sales_records
+                WHERE department = ? {year_condition}
+                GROUP BY product_name, color
+                HAVING total_amount > 0
+                ORDER BY total_amount DESC
+                LIMIT 15
+            '''
+            dept_products = pd.read_sql_query(product_query, conn, params=params)
+        
+        if not dept_products.empty:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 热销产品TOP10")
+                top_products = dept_products.head(10)
+                top_products['product_display'] = top_products.apply(
+                    lambda x: f"{x['product_name']} - {x['color']}", axis=1
+                )
                 
-                with col1:
-                    # 热销产品TOP10
-                    top_products = product_stats.head(10)
-                    fig_top_products = px.bar(
-                        top_products,
-                        x='product_name',
-                        y='total_amount',
-                        color='color',
-                        title=f"{department}热销产品TOP10",
-                        labels={
-                            'product_name': '产品名称', 
-                            'total_amount': '销售额 (¥)',
-                            'color': '颜色'
-                        }
-                    )
-                    fig_top_products.update_traces(
-                        hovertemplate='<b>%{x}</b><br>销售额: ¥%{y:,.2f}<extra></extra>'
-                    )
-                    fig_top_products.update_layout(
-                        template="plotly_white",
-                        xaxis_title="产品名称",
-                        yaxis_title="销售额 (¥)",
-                        xaxis_tickangle=-45,
-                        showlegend=True,
-                    )
-                    st.plotly_chart(fig_top_products, width='stretch')
+                option = create_echarts_bar_chart(
+                    top_products, 'product_display', 'total_amount',
+                    f"{department}热销产品TOP10", 'danger'
+                )
+                if option:
+                    st_echarts(option, height=400)
+            
+            with col2:
+                # 产品价格分析表格
+                st.markdown("#### 产品价格统计")
+                display_products = dept_products.copy()
+                display_products = display_products.rename(columns={
+                    'product_name': '产品名称',
+                    'color': '颜色',
+                    'total_amount': '总金额',
+                    'transaction_count': '交易次数',
+                    'total_quantity': '总数量',
+                    'avg_price': '平均价格'
+                })
                 
-                with col2:
-                    # 产品价格分布
-                    fig_price_dist = px.box(
-                        product_stats,
-                        x='product_name',
-                        y='avg_price',
-                        title=f"{department}产品价格分布",
-                        points="all",
-                        labels={
-                            'product_name': '产品名称',
-                            'avg_price': '平均价格 (¥)'
-                        }
-                    )
-                    fig_price_dist.update_traces(
-                        hovertemplate='<b>%{x}</b><br>平均价格: ¥%{y:.2f}<extra></extra>'
-                    )
-                    fig_price_dist.update_layout(
-                        template="plotly_white",
-                        xaxis_title="产品名称",
-                        yaxis_title="平均价格 (¥)",
-                        xaxis_tickangle=-45,
-                        showlegend=False,
-                    )
-                    st.plotly_chart(fig_price_dist, width='stretch')
+                st.dataframe(
+                    display_products[['产品名称', '颜色', '总金额', '交易次数', '总数量', '平均价格']],
+                    width='stretch',
+                    hide_index=True
+                )
         
         # 数据导出
         st.markdown("---")
@@ -512,701 +1213,150 @@ def create_department_analysis_tab(department):
         col1, col2 = st.columns(2)
         
         with col1:
-            # 导出部门数据（中文表头）
-            export_data = dept_data.copy()
-            export_data = export_data.rename(columns={
-                'customer_name': '客户名称',
-                'finance_id': '财务编号',
-                'sub_customer_name': '子客户名称',
-                'product_name': '产品名称',
-                'color': '颜色',
-                'grade': '等级',
-                'quantity': '数量',
-                'unit_price': '单价',
-                'amount': '金额',
-                'ticket_number': '票据号码',
-                'remark': '备注',
-                'production_line': '生产线',
-                'record_date': '记录日期'
-            })
-            csv_data = export_data.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-            st.download_button(
-                f"📥 导出{department}数据",
-                csv_data,
-                f"{department}_数据.csv",
-                "text/csv",
-                width='stretch'
-            )
+            # 导出部门详细数据
+            if 'dept_stats' in locals():
+                summary_data = {
+                    '指标': ['总记录数', '客户数量', '产品数量', '颜色种类', '总金额', '总数量', '平均价格'],
+                    '数值': [
+                        dept_stats['total_records'],
+                        dept_stats['customer_count'],
+                        dept_stats['product_count'],
+                        dept_stats['color_count'],
+                        dept_stats['total_amount'],
+                        dept_stats['total_quantity'],
+                        dept_stats['avg_price']
+                    ]
+                }
+                summary_df = pd.DataFrame(summary_data)
+                csv_summary = summary_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 导出部门统计",
+                    data=csv_summary,
+                    file_name=f"{department}_{year_filter}_统计.csv",
+                    mime="text/csv",
+                    width='stretch'
+                )
         
         with col2:
-            if not dept_data.empty:
-                product_stats = dept_data.groupby(['product_name', 'color']).agg({
-                    'amount': 'sum', 'quantity': 'sum', 'unit_price': 'mean', 'customer_name': 'count'
-                }).reset_index()
-                # 导出产品统计（中文表头）
-                export_products = product_stats.copy()
-                export_products = export_products.rename(columns={
-                    'product_name': '产品名称',
-                    'color': '颜色',
-                    'amount': '总金额',
-                    'quantity': '总数量',
-                    'unit_price': '平均价格',
-                    'customer_name': '交易次数'
-                })
-                csv_products = export_products.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            # 导出生产线数据
+            if 'production_data' in locals() and not production_data.empty:
+                csv_lines = production_data.to_csv(index=False, encoding='utf-8-sig')
                 st.download_button(
-                    f"📥 导出{department}产品统计",
-                    csv_products,
-                    f"{department}_产品统计.csv",
-                    "text/csv",
+                    label="🏭 导出生产线数据",
+                    data=csv_lines,
+                    file_name=f"{department}_{year_filter}_生产线数据.csv",
+                    mime="text/csv",
                     width='stretch'
                 )
                 
     except Exception as e:
         st.error(f"分析{department}数据时出错: {str(e)}")
 
-# ==================== 总数分析优化 ====================
+# ==================== 侧边栏配置 ====================
+with st.sidebar:
+    st.markdown("### ⚙️ 分析设置")
+    
+    # 年份选择器
+    available_years = get_available_years()
+    selected_year = st.selectbox(
+        "选择分析年份",
+        available_years,
+        key="year_selector",
+        help="选择要分析的年份，'全部年份'将显示所有数据"
+    )
+    
+    if selected_year != "全部年份":
+        st.info(f"📅 当前分析: {selected_year}年")
+    
+    st.markdown("---")
+    
+    # 快速导航
+    st.markdown("### 🔍 快速导航")
+    
+    # 获取当前年份的部门列表
+    current_depts = get_department_list(selected_year)
+    
+    # 使用session_state管理当前视图
+    if 'current_view' not in st.session_state:
+        st.session_state.current_view = "总数分析"
+    
+    if st.button("📊 总体概览", width='stretch'):
+        st.session_state.current_view = "总数分析"
+        st.rerun()
+    
+    if current_depts:
+        st.markdown("**部门分析**")
+        for dept in current_depts:
+            if st.button(f"🏢 {dept}", width='stretch'):
+                st.session_state.current_view = f"🏢 {dept}"
+                st.rerun()
+    else:
+        st.info("暂无部门数据")
+    
+    st.markdown("---")
+    
+    # 页面信息
+    st.markdown("#### ℹ️ 页面信息")
+    stats = get_cached_total_stats(selected_year)
+    st.caption(f"• 总记录数: {int(stats['total_records']):,}")
+    st.caption(f"• 数据时间: {selected_year}")
+    st.caption(f"• 部门数量: {len(current_depts)}")
 
-@st.cache_data(ttl=60)
-def get_cached_total_stats():
-    """缓存总数统计数据"""
-    return analysis_service.get_statistics()
+# ==================== 主页面布局 ====================
+st.markdown("---")
 
-def render_total_metrics(stats):
-    """渲染总数分析指标 - 优化布局"""
-    # 第一行指标
-    cols1 = st.columns(4)
-    metrics1 = [
-        ("总记录数", f"{stats['total_records']:,}"),
-        ("主客户", f"{stats['main_customers']:,}"),
-        ("子客户数", f"{stats['sub_customers']:,}"),
-        ("产品颜色数", f"{stats['unique_colors']:,}")
-    ]
-    
-    for col, (label, value) in zip(cols1, metrics1):
-        with col:
-            st.metric(label, value)
-    
-    # 第二行指标
-    cols2 = st.columns(4)
-    metrics2 = [
-        ("产品等级数", f"{stats['unique_grades']:,}"),
-        ("最低价格", f"¥{stats.get('min_price', 0):.2f}"),
-        ("最高价格", f"¥{stats.get('max_price', 0):.2f}"),
-        ("平均价格", f"¥{stats.get('avg_price', 0):.2f}")
-    ]
-    
-    for col, (label, value) in zip(cols2, metrics2):
-        with col:
-            create_metric_card(label, value)
-    
-    # 第三行指标
-    cols3 = st.columns(4)
-    total_quantity = stats.get('total_quantity', 0)
-    total_amount = stats.get('total_amount', 0)
-    avg_amount = total_amount / stats['total_records'] if stats['total_records'] > 0 else 0
-    avg_customer_amount = total_amount / stats['sub_customers'] if stats['sub_customers'] > 0 else 0
-    
-    metrics3 = [
-        ("总数量", f"{total_quantity:,.0f}"),
-        ("总金额", f"¥{total_amount:,.2f}"),
-        ("平均交易金额", f"¥{avg_amount:,.2f}"),
-        ("客单价", f"¥{avg_customer_amount:,.2f}")
-    ]
-    
-    for col, (label, value) in zip(cols3, metrics3):
-        with col:
-            create_metric_card(label, value)
+# 根据session_state显示不同视图
+if st.session_state.current_view == "总数分析":
+    render_total_analysis_optimized(selected_year)
+else:
+    # 部门详细分析
+    department = st.session_state.current_view.replace("🏢 ", "")
+    create_department_analysis_tab_optimized(department, selected_year)
 
-def render_customer_analysis():
-    """渲染客户分析"""
-    st.subheader("👥 客户分析")
-    
-    with get_connection() as conn:
-        # 客户交易统计
-        customer_stats = pd.read_sql_query('''
-            SELECT 
-                customer_name,
-                COUNT(DISTINCT color) as product_colors,
-                COUNT(*) as transaction_count,
-                SUM(amount) as total_amount,
-                AVG(unit_price) as avg_price
-            FROM sales_records
-            GROUP BY customer_name
-            HAVING total_amount > 0
-            ORDER BY total_amount DESC
-            LIMIT 20
-        ''', conn)
-    
+# ==================== 页面底部说明 ====================
+with st.expander("📚 使用说明与性能提示", expanded=False):
     col1, col2 = st.columns(2)
     
     with col1:
-        if not customer_stats.empty:
-            fig_customer_sales = px.bar(
-                customer_stats.head(10), 
-                x='customer_name', 
-                y='total_amount',
-                title="🏆 TOP10 客户销售额",
-                color='total_amount', 
-                color_continuous_scale="Tealgrn",
-                labels={
-                    'customer_name': '客户名称',
-                    'total_amount': '销售额（￥）'
-                }
-            )
-            fig_customer_sales.update_traces(
-                hovertemplate='<b>%{x}</b><br>销售额: ¥%{y:,.2f}<extra></extra>'
-            )
-            fig_customer_sales.update_layout(
-                template="plotly_white",
-                xaxis_title="客户名称",
-                yaxis_title="销售额（￥）",
-                xaxis_tickangle=-30,
-            )
-            st.plotly_chart(fig_customer_sales, width='stretch')
-        else:
-            st.info("暂无客户交易数据")
+        st.markdown("""
+        ### 🚀 性能优化说明
+        
+        **查询优化**
+        - 所有查询都已添加缓存，数据变化时才重新计算
+        - 数据库索引自动创建，加速查询
+        - 大数据量时自动采样，保证响应速度
+        
+        **图表优化**
+        - 使用ECharts高性能图表引擎
+        - 复合图表支持dataZoom数据缩放
+        - 所有图表都经过性能调优
+        
+        **内存管理**
+        - 数据分页加载，避免内存溢出
+        - 自动清理缓存，防止内存泄漏
+        """)
     
     with col2:
-        if not customer_stats.empty:
-            fig_customer_products = px.scatter(
-                customer_stats,
-                x='total_amount', 
-                y='product_colors',
-                size='transaction_count', 
-                color='avg_price',
-                hover_name='customer_name',
-                title='💬 客户销售额 vs 产品多样性',
-                color_continuous_scale='Viridis',
-                size_max=35,
-                labels={
-                    'total_amount': '销售额（￥）',
-                    'product_colors': '产品颜色数',
-                    'transaction_count': '交易次数',
-                    'avg_price': '平均价格（￥）'
-                }
-            )
-            fig_customer_products.update_layout(
-                template="plotly_white",
-                xaxis_title="销售额（￥）",
-                yaxis_title="产品颜色数",
-            )
-            fig_customer_products.update_traces(
-                hovertemplate='<b>%{hovertext}</b><br>' +
-                            '销售额：¥%{x:,.2f}<br>' +
-                            '产品颜色数：%{y}<br>' +
-                            '交易次数：%{marker.size}<br>' +
-                            '平均价格：¥%{marker.color:,.2f}<extra></extra>',
-            )
-            st.plotly_chart(fig_customer_products, width='stretch')
-        else:
-            st.info("暂无客户交易数据")
-    
-    return customer_stats
+        st.markdown("""
+        ### 📊 功能亮点
+        
+        **完整分析结构**
+        - 关键指标卡片展示
+        - 生产线详细分析（柱状图+饼图+表格）
+        - 时间趋势分析（复合图带dataZoom）
+        - 产品分析（热销产品TOP10+价格统计）
+        - 月度详细数据表格
+        
+        **智能图表**
+        - 复合图表（折线+柱状）带dataZoom
+        - 交互式数据探索
+        - 支持图表导出为图片
+        
+        **数据管理**
+        - 一键导出各种格式数据
+        - 支持按年份筛选分析
+        - 实时数据更新与缓存
+        """)
 
-def render_product_analysis():
-    """渲染产品分析"""
-    st.subheader("🏺 产品分析")
-    
-    with get_connection() as conn:
-        # 产品统计
-        product_stats = pd.read_sql_query('''
-            SELECT 
-                CONCAT(product_name, ' - ', color) as product_info,
-                product_name,
-                color,
-                CASE 
-                    WHEN grade IS NULL OR grade = '' THEN '无等级'
-                    ELSE grade 
-                END as grade,
-                COUNT(*) as transaction_count,
-                AVG(unit_price) as avg_price,
-                SUM(quantity) as total_quantity,
-                SUM(amount) as total_amount
-            FROM sales_records 
-            GROUP BY product_name, color, grade
-            HAVING total_amount > 0
-            ORDER BY total_amount DESC
-        ''', conn)
-
-    if not product_stats.empty:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            top_products = product_stats.nlargest(10, 'total_amount')
-            fig_top_products = px.bar(
-                top_products, 
-                x='product_info',
-                y='total_amount',
-                color='grade', 
-                title='🔥 热销产品TOP10 (按销售额)',
-                labels={
-                    'product_info': '产品名称 - 颜色',
-                    'total_amount': '销售额（￥）',
-                    'grade': '产品等级'
-                },
-            )
-            fig_top_products.update_traces(
-                hovertemplate='<b>%{x}</b><br>销售额: ¥%{y:,.2f}<extra></extra>'
-            )
-            fig_top_products.update_layout(
-                template="plotly_white",
-                xaxis_title="产品名称 - 颜色",
-                yaxis_title="销售额（￥）",
-                xaxis_tickangle=-45,
-            )
-            st.plotly_chart(fig_top_products, width='stretch')
-        
-        with col2:
-            # 产品价格分布
-            fig_product_price = px.box(
-                product_stats, 
-                x='product_info',
-                y='avg_price',
-                color='grade',
-                title='📊 各产品价格分布',
-                labels={
-                    'product_info': '产品名称 - 颜色',
-                    'avg_price': '平均价格（元）',
-                    'grade': '产品等级'
-                }
-            )
-            fig_product_price.update_traces(
-                hovertemplate='<b>%{x}</b><br>平均价格: ¥%{y:.2f}<extra></extra>'
-            )
-            fig_product_price.update_layout(
-                template="plotly_white",
-                xaxis_title="产品名称 - 颜色",
-                yaxis_title="平均价格（元）",
-                xaxis_tickangle=-45,
-            )
-            st.plotly_chart(fig_product_price, width='stretch')
-    
-    return product_stats
-
-def render_time_trend_analysis():
-    """渲染时间趋势分析 - 优化中文月份显示"""
-    st.subheader("📅 时间趋势分析")
-    
-    with get_connection() as conn:
-        # 月度趋势
-        monthly_trend = pd.read_sql_query('''
-            SELECT 
-                strftime('%Y-%m', record_date) as month,
-                COUNT(*) as transaction_count,
-                SUM(amount) as total_amount,
-                AVG(unit_price) as avg_price,
-                SUM(quantity) as total_quantity
-            FROM sales_records
-            GROUP BY strftime('%Y-%m', record_date)
-            ORDER BY month
-        ''', conn)
-    
-    if not monthly_trend.empty and len(monthly_trend) > 1:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig_trend = create_trend_comparison_chart(
-                monthly_trend, 'total_amount', 'transaction_count',
-                "📊 销售额 vs 交易量 时间对比趋势",
-                primary_color="rgba(138, 92, 246, .85)", secondary_color='rgba(6, 214, 160, .7)'
-            )
-            if fig_trend:
-                st.plotly_chart(fig_trend, width='stretch')
-        
-        with col2:
-            fig_price_qty = create_trend_comparison_chart(
-                monthly_trend, 'avg_price', 'total_quantity',
-                "📦 平均单价 vs 销售数量 趋势变化",
-                primary_color='rgba(239, 71, 111, .85)', secondary_color='rgba(17, 138, 178, .7)'
-            )
-            if fig_price_qty:
-                st.plotly_chart(fig_price_qty, width='stretch')
-        
-        # 月度详细数据表格
-        st.subheader("📈 月度详细数据")
-        display_monthly = monthly_trend.copy()
-        display_monthly['月份'] = display_monthly['month'].apply(format_chinese_month)
-        display_monthly['交易次数'] = display_monthly['transaction_count']
-        display_monthly['总金额'] = display_monthly['total_amount'].round(2)
-        display_monthly['平均价格'] = display_monthly['avg_price'].round(2)
-        display_monthly['总数量'] = display_monthly['total_quantity']
-        
-        st.dataframe(
-            display_monthly[['月份', '交易次数', '总金额', '平均价格', '总数量']],
-            width='stretch',
-            hide_index=True
-        )
-        
-        return monthly_trend
-    else:
-        st.info("暂无足够的时间趋势数据")
-        return pd.DataFrame()
-
-def render_total_analysis():
-    """渲染总数分析选项卡"""
-    try:
-        stats = get_cached_total_stats()
-        
-        if stats['total_records'] == 0:
-            st.warning("⚠️ 暂无数据，请先导入Excel文件")
-            return
-        
-        # 关键指标概览
-        st.subheader("📈 关键指标概览")
-        render_total_metrics(stats)
-        
-        # 部门销售额分析
-        st.markdown("---")
-        st.subheader("🏢 部门销售额分析")
-        
-        with get_connection() as conn:
-            dept_sales = pd.read_sql_query('''
-                SELECT 
-                    CASE 
-                        WHEN department IS NULL OR department = '' THEN '未分类'
-                        ELSE department 
-                    END as department,
-                    SUM(amount) as total_amount,
-                    COUNT(*) as transaction_count,
-                    AVG(unit_price) as avg_price
-                FROM sales_records
-                GROUP BY department
-                ORDER BY total_amount DESC
-            ''', conn)
-        
-        if not dept_sales.empty:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig_dept_sales = create_bar_chart(
-                    dept_sales, 'department', 'total_amount',
-                    "🏢 各部门销售额对比",
-                    x_label="部门", y_label="销售额"
-                )
-                fig_dept_sales.update_traces(
-                    hovertemplate="部门：%{x}<br>销售额: ¥%{y:,.2f}<extra></extra>"
-                )
-                if fig_dept_sales:
-                    st.plotly_chart(fig_dept_sales, width='stretch')
-            
-            with col2:
-                fig_dept_pie = create_pie_chart(
-                    dept_sales[dept_sales['department'] != '未分类'], 
-                    'total_amount', 'department', "部门销售额占比"
-                )
-                if fig_dept_pie:
-                    st.plotly_chart(fig_dept_pie, width='stretch')
-        
-        # 金额分析
-        st.markdown("---")
-        st.subheader("💰 金额分析")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            with get_connection() as conn:
-                monthly_amount = pd.read_sql_query('''
-                    SELECT 
-                        strftime('%Y-%m', record_date) as month,
-                        SUM(amount) as total_amount,
-                        COUNT(*) as transaction_count
-                    FROM sales_records
-                    WHERE amount > 0
-                    GROUP BY strftime('%Y-%m', record_date)
-                    ORDER BY month
-                ''', conn)
-            
-            if not monthly_amount.empty:
-                # 转换为中文月份
-                monthly_amount = monthly_amount.copy()
-                monthly_amount['month_chinese'] = monthly_amount['month'].apply(format_chinese_month)
-                
-                fig_monthly = px.line(
-                    monthly_amount, x="month_chinese", y="total_amount",
-                    title="📈 月度销售额趋势",
-                    line_shape='spline', markers=True,
-                    color_discrete_sequence=["#2563EB"]
-                )
-                fig_monthly.update_traces(
-                    hovertemplate="月份: %{x}<br>销售额: ¥%{y:,.2f}<extra></extra>"
-                )
-                fig_monthly.update_layout(
-                    template="plotly_white",
-                    xaxis_title="月份",
-                    yaxis_title="销售额 (¥)",
-                )
-                st.plotly_chart(fig_monthly, width='stretch')
-            else:
-                st.info("暂无月度趋势数据")
-        
-        with col2:
-            with get_connection() as conn:
-                color_sales = pd.read_sql_query('''
-                    SELECT 
-                        color,
-                        SUM(amount) as total_amount,
-                        COUNT(*) as transaction_count
-                    FROM sales_records
-                    WHERE amount > 0 AND color IS NOT NULL AND color != ''
-                    GROUP BY color
-                    ORDER BY total_amount DESC
-                    LIMIT 10
-                ''', conn)
-            
-            if not color_sales.empty:
-                fig_color = create_bar_chart(
-                    color_sales, 'color', 'total_amount',
-                    "🎨 TOP10 产品颜色销售额",
-                    x_label="产品颜色", y_label="销售额"
-                )
-                fig_color.update_traces(
-                    hovertemplate="产品颜色：%{x}<br>销售额: ¥%{y:,.2f}<extra></extra>"
-                )
-                if fig_color:
-                    st.plotly_chart(fig_color, width='stretch')
-            else:
-                st.info("暂无产品颜色销售数据")
-        
-        # 价格分布分析
-        st.markdown("---")
-        st.subheader("💎 价格区间分析")
-        
-        with get_connection() as conn:
-            price_distribution = pd.read_sql_query('''
-                SELECT 
-                    CASE 
-                        WHEN unit_price <= 0.5 THEN '0-0.5'
-                        WHEN unit_price <= 1 THEN '0.5-1'
-                        WHEN unit_price <= 1.5 THEN '1-1.5'
-                        WHEN unit_price <= 2 THEN '1.5-2'
-                        WHEN unit_price <= 3 THEN '2-3'
-                        WHEN unit_price <= 5 THEN '3-5'
-                        WHEN unit_price <= 10 THEN '5-10'
-                        ELSE '10+'
-                    END as price_range,
-                    COUNT(*) as count,
-                    AVG(unit_price) as avg_price,
-                    SUM(amount) as total_amount
-                FROM sales_records 
-                WHERE unit_price > 0
-                GROUP BY price_range
-                ORDER BY MIN(unit_price)
-            ''', conn)
-        
-        if not price_distribution.empty:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig_price_dist = create_bar_chart(
-                    price_distribution, 'price_range', 'count',
-                    "📦 价格区间交易分布",
-                    x_label="价格区间", y_label="交易数量"
-                )
-                fig_price_dist.update_traces(
-                    hovertemplate="价格区间: %{x}<br>交易数量: %{y}<br>"
-                )
-                if fig_price_dist:
-                    st.plotly_chart(fig_price_dist, width='stretch')
-                    
-                # 核心价格区间统计
-                total_transactions = price_distribution['count'].sum()
-                main_range_count = price_distribution[
-                    price_distribution['price_range'].isin(['1-1.5', '1.5-2'])
-                ]['count'].sum()
-                main_range_percentage = (main_range_count / total_transactions) * 100
-                
-                st.metric("核心价格区间(1-2元)占比", f"{main_range_percentage:.1f}%", 
-                         delta=f"{main_range_count}笔交易")
-            
-            with col2:
-                # 组合图表
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    x=price_distribution['price_range'], 
-                    y=price_distribution['count'],
-                    name="交易数量",
-                    marker_color='#1f77b4',
-                    opacity=0.85,
-                    hovertemplate='价格区间: %{x}<br>交易数量: %{y}<extra></extra>',
-                ))
-                fig.add_trace(go.Scatter(
-                    x=price_distribution['price_range'], 
-                    y=price_distribution['avg_price'],
-                    name="平均价格",
-                    line_shape='spline', 
-                    mode='lines+markers',
-                    line=dict(color='#ff7f0e', width=3),
-                    yaxis='y2',
-                    hovertemplate='价格区间: %{x}<br>平均价格: ¥%{y:.2f}<extra></extra>'
-                ))
-                fig.update_layout(
-                    title="📈 价格分布与平均价格趋势",
-                    template="plotly_white",
-                    xaxis_title='价格区间',
-                    yaxis=dict(title="交易数量"),
-                    yaxis2=dict(title="平均价格（￥）", overlaying='y', side='right', showgrid=False),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                )
-                st.plotly_chart(fig, width='stretch')
-                # 添加价格集中度分析
-                st.markdown("**价格集中度分析**")
-                
-                # 计算价格分布的统计指标
-                max_count_range = price_distribution.loc[price_distribution['count'].idxmax()]
-                col_21, col_22 = st.columns(2)
-                with col_21:
-                    st.write(f"• **最密集区间**: ￥{max_count_range['price_range']} ({max_count_range['count']}笔)")
-        
-        # 客户分析
-        st.markdown("---")
-        customer_stats = render_customer_analysis()
-        
-        # 产品分析
-        st.markdown("---")
-        product_stats = render_product_analysis()
-        
-        # 时间趋势分析
-        st.markdown("---")
-        monthly_trend = render_time_trend_analysis()
-        
-        # 数据导出
-        st.markdown("---")
-        st.subheader("💾 数据导出")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            # 导出客户统计（中文表头）
-            if not customer_stats.empty:
-                export_customer = customer_stats.copy()
-                export_customer = export_customer.rename(columns={
-                    'customer_name': '客户名称',
-                    'product_colors': '产品颜色数',
-                    'transaction_count': '交易次数',
-                    'total_amount': '总金额',
-                    'avg_price': '平均价格'
-                })
-                csv_customer = export_customer.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-                st.download_button(
-                    "📥 导出客户统计",
-                    csv_customer,
-                    "客户统计.csv",
-                    "text/csv",
-                    width='stretch'
-                )
-            else:
-                st.info("暂无客户数据")
-        
-        with col2:
-            # 导出产品统计（中文表头）
-            if not product_stats.empty:
-                export_product = product_stats.copy()
-                export_product = export_product.rename(columns={
-                    'product_info': '产品信息',
-                    'product_name': '产品名称',
-                    'color': '颜色',
-                    'grade': '等级',
-                    'transaction_count': '交易次数',
-                    'avg_price': '平均价格',
-                    'total_quantity': '总数量',
-                    'total_amount': '总金额'
-                })
-                csv_product = export_product.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-                st.download_button(
-                    "📥 导出产品统计", 
-                    csv_product,
-                    "产品统计.csv",
-                    "text/csv",
-                    width='stretch'
-                )
-            else:
-                st.info("暂无产品数据")
-        
-        with col3:
-            # 导出月度趋势（中文表头）
-            if not monthly_trend.empty:
-                export_monthly = monthly_trend.copy()
-                export_monthly = export_monthly.rename(columns={
-                    'month': '月份',
-                    'transaction_count': '交易次数',
-                    'total_amount': '总金额',
-                    'avg_price': '平均价格',
-                    'total_quantity': '总数量'
-                })
-                csv_monthly = export_monthly.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-                st.download_button(
-                    "📥 导出月度趋势",
-                    csv_monthly,
-                    "月度趋势.csv",
-                    "text/csv", 
-                    width='stretch'
-                )
-            else:
-                st.info("暂无月度数据")
-                
-    except Exception as e:
-        st.error(f"获取统计数据时出错: {str(e)}")
-        st.info("请确保已正确导入数据并初始化数据库")
-
-# ==================== 主页面布局 ====================
-
-# 获取部门列表用于动态生成选项卡
-@st.cache_data(ttl=60)
-def get_department_list():
-    """获取所有部门列表"""
-    with get_connection() as conn:
-        dept_list = pd.read_sql_query('''
-            SELECT DISTINCT department
-            FROM sales_records
-            WHERE department IS NOT NULL AND department != ''
-            ORDER BY department
-        ''', conn)
-        return dept_list['department'].tolist() if not dept_list.empty else []
-
-# 创建选项卡
-departments = get_department_list()
-tab_names = ["总数分析"] + departments
-tabs = st.tabs(tab_names)
-
-with tabs[0]:
-    render_total_analysis()
-
-# 为每个部门创建分析选项卡
-for i, department in enumerate(departments, 1):
-    if i < len(tabs):  # 确保索引不越界
-        with tabs[i]:
-            create_department_analysis_tab(department)
-
-# 使用说明
-with st.expander("📚 使用说明", expanded=False):
-    st.markdown("""
-    ### 数据统计页面说明
-    
-    **功能概述**
-    - 提供全面的数据分析和可视化
-    - 从多个维度分析业务数据
-    - 支持数据导出和深入分析
-    
-    **分析维度**
-    1. **部门概览** - 基于department字段的部门分类统计
-    2. **总数分析** - 整体业务数据概览
-    3. **部门分析** - 各部门的详细数据分析
-    
-    **时间维度分析**
-    - 月度销售额趋势分析
-    - 交易量与销售额对比
-    - 平均单价与销售数量趋势
-    - 时间序列数据导出
-    
-    **使用技巧**
-    - 关注关键指标的异常变化
-    - 通过图表识别业务模式和趋势
-    - 导出数据用于进一步分析和报告制作
-    - 定期查看时间趋势了解业务发展
-    
-    **数据说明**
-    - 部门字段(department)已替代原有的生产线分类逻辑
-    - 确保导入数据时填写正确的部门信息
-    - 未分类的数据会单独显示，便于数据清理
-    """)
+# 页面加载完成提示
+st.toast("✅ 页面加载完成！", icon="🎉")
