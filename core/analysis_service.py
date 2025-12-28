@@ -105,19 +105,6 @@ class AnalysisService:
             df = pd.read_sql_query(query, conn, params=params)
             return self._format_dataframe(df)
 
-    def get_customers(self):
-        """获取客户列表（仅活跃）"""
-        with get_connection() as conn:
-            df = pd.read_sql_query('''
-                SELECT DISTINCT 
-                    customer_name,
-                    finance_id
-                FROM customers 
-                WHERE is_active = TRUE 
-                ORDER BY customer_name
-            ''', conn)
-            return df
-
     def get_products(self):
         """获取产品列表"""
         with get_connection() as conn:

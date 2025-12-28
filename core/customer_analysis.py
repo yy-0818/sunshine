@@ -53,8 +53,8 @@ class SalesDebtIntegrationService:
                         return '低活跃(180天内)'
                     elif days <= 365:
                         return '休眠客户'
-                    else:
-                        return '一年内无销售'
+                    # else:
+                    #     return '一年内无销售'
                 
                 sales_df['销售活跃度'] = sales_df['days_since_last_sale'].apply(classify_activity)
         
