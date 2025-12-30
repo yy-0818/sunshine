@@ -559,12 +559,12 @@ def create_echarts_bar_chart(data, x_col, y_col, title, color_scheme='primary'):
             },
             "axisLabel": {
                 "rotate": 45,
-                "fontSize": 11
+                "fontSize": 10
             }
         },
         "yAxis": {
             "type": "value",
-            "name": "金额",
+            "name": "",
             "axisLine": {
                 "show": True
             }
