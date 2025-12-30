@@ -364,7 +364,7 @@ def render_review_analysis_tab(integration_service):
     st.header("🔍 客户信用复核分析")
     
     with st.container(border=True):
-        st.subheader("⚙️ 分析参数设置")
+        # st.subheader("⚙️ 分析参数设置")
         
         col1, col2, col3 = st.columns(3)
         
@@ -447,12 +447,6 @@ def render_review_analysis_tab(integration_service):
     else:
         avg_risk_score = 0
     
-    # 计算有销售的客户数量
-    if '总销售额' in integrated_df.columns:
-        customers_with_sales = len(integrated_df[integrated_df['总销售额'] > 0])
-    else:
-        customers_with_sales = 0
-    
     # 计算欠销比
     debt_sales_ratio = (total_debt / year_sales_total * 100) if year_sales_total > 0 else 0
     
@@ -498,8 +492,6 @@ def render_review_analysis_tab(integration_service):
             )
         else:
             st.metric("高风险客户", "N/A", help="风险评分低于40分的客户数量")
-    
-    st.divider()
     
     st.subheader("📋 详细数据查看")
     
@@ -548,65 +540,65 @@ def render_review_analysis_tab(integration_service):
                 activity_selected = []
                 st.multiselect("销售活跃度", options=[], disabled=True, placeholder="无数据")
     
-    df_display = integrated_df.copy()
-    
-    if search_term:
-        mask = (
-            df_display['客户名称'].astype(str).str.contains(search_term, case=False, na=False) |
-            df_display['财务编号'].astype(str).str.contains(search_term, case=False, na=False)
+        df_display = integrated_df.copy()
+        
+        if search_term:
+            mask = (
+                df_display['客户名称'].astype(str).str.contains(search_term, case=False, na=False) |
+                df_display['财务编号'].astype(str).str.contains(search_term, case=False, na=False)
+            )
+            df_display = df_display[mask]
+        
+        if grade_selected:
+            df_display = df_display[df_display['客户综合等级'].isin(grade_selected)]
+        
+        if activity_selected:
+            df_display = df_display[df_display['销售活跃度'].isin(activity_selected)]
+        
+        # 定义显示的列（移除了风险等级列）
+        base_columns = ['财务编号', '客户名称', '所属部门']
+        sales_columns = [year_sales_column, '总销售额'] if year_sales_column in df_display.columns else ['总销售额']
+        debt_columns = [debt_column, '欠销比'] if '欠销比' in df_display.columns else [debt_column]
+        analysis_columns = ['销售活跃度', '客户综合等级', '风险评分']
+        
+        display_columns = base_columns + sales_columns + debt_columns + analysis_columns
+        display_columns = [col for col in display_columns if col in df_display.columns]
+        
+        if not display_columns:
+            st.warning("没有可显示的列")
+            return
+        
+        # 应用样式
+        styled_df = apply_style(
+            df_display[display_columns],
+            highlight_integrated=True,
+            highlight_score=True
         )
-        df_display = df_display[mask]
-    
-    if grade_selected:
-        df_display = df_display[df_display['客户综合等级'].isin(grade_selected)]
-    
-    if activity_selected:
-        df_display = df_display[df_display['销售活跃度'].isin(activity_selected)]
-    
-    # 定义显示的列（移除了风险等级列）
-    base_columns = ['财务编号', '客户名称', '所属部门']
-    sales_columns = [year_sales_column, '总销售额'] if year_sales_column in df_display.columns else ['总销售额']
-    debt_columns = [debt_column, '欠销比'] if '欠销比' in df_display.columns else [debt_column]
-    analysis_columns = ['销售活跃度', '客户综合等级', '风险评分']
-    
-    display_columns = base_columns + sales_columns + debt_columns + analysis_columns
-    display_columns = [col for col in display_columns if col in df_display.columns]
-    
-    if not display_columns:
-        st.warning("没有可显示的列")
-        return
-    
-    # 应用样式
-    styled_df = apply_style(
-        df_display[display_columns],
-        highlight_integrated=True,
-        highlight_score=True
-    )
-    
-    st.dataframe(
-        styled_df,
-        column_config=get_column_config(analysis_year),
-        width='stretch',
-        height=min(600, 100 + len(df_display) * 35),
-        hide_index=True,
-    )
-    
-    # 底部信息
-    col_info1, col_info2, col_info3, col_info4 = st.columns(4)
-    with col_info1:
-        st.caption(f"📊 显示 {len(df_display)} / {len(integrated_df)} 条记录")
-    
-    with col_info2:
-        filtered_debt = df_display[debt_column].sum() if debt_column in df_display.columns else 0
-        st.caption(f"💰 筛选欠款: {format_currency(filtered_debt)}")
-    
-    with col_info3:
-        filtered_year_sales = df_display[year_sales_column].sum() if year_sales_column in df_display.columns else 0
-        st.caption(f"💰 {year_sales_column}: {format_currency(filtered_year_sales)}")
-    
-    with col_info4:
-        filtered_total_sales = df_display['总销售额'].sum() if '总销售额' in df_display.columns else 0
-        st.caption(f"💰 历史销售额: {format_currency(filtered_total_sales)}")
+        
+        st.dataframe(
+            styled_df,
+            column_config=get_column_config(analysis_year),
+            width='stretch',
+            height=min(600, 100 + len(df_display) * 35),
+            hide_index=True,
+        )
+        
+        # 底部信息
+        col_info1, col_info2, col_info3, col_info4 = st.columns(4)
+        with col_info1:
+            st.caption(f"📊 显示 {len(df_display)} / {len(integrated_df)} 条记录")
+        
+        with col_info2:
+            filtered_debt = df_display[debt_column].sum() if debt_column in df_display.columns else 0
+            st.caption(f"💰 筛选欠款: {format_currency(filtered_debt)}")
+        
+        with col_info3:
+            filtered_year_sales = df_display[year_sales_column].sum() if year_sales_column in df_display.columns else 0
+            st.caption(f"💰 {year_sales_column}: {format_currency(filtered_year_sales)}")
+        
+        with col_info4:
+            filtered_total_sales = df_display['总销售额'].sum() if '总销售额' in df_display.columns else 0
+            st.caption(f"💰 历史销售额: {format_currency(filtered_total_sales)}")
 
     # 导出功能
     if not df_display.empty:
