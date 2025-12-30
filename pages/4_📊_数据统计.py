@@ -21,16 +21,6 @@ st.title("📊 数据统计分析仪表板")
 
 require_login()
 
-# ==================== 样式和配置 ====================
-st.markdown("""
-<style>
-/* 侧边栏样式优化 */
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
-}
-</style>
-""", unsafe_allow_html=True)
-
 # 现代商业配色方案
 COLOR_SCHEME = {
     'primary': ['#4f46e5', '#7c3aed', '#a855f7', '#d946ef'],  # 紫色系
@@ -485,21 +475,20 @@ def create_echarts_pie_chart(data, value_col, name_col, title, radius=['40%', '7
         })
     
     option = {
-        "title": {
-            "text": title,
-            "left": "center",
-            "textStyle": {
-                "fontSize": 16,
-                "fontWeight": "bold"
-            }
-        },
+        # "title": {
+        #     "text": title,
+        #     "left": "center",
+        #     "textStyle": {
+        #         "fontSize": 16,
+        #         "fontWeight": "bold"
+        #     }
+        # },
         "tooltip": {
             "trigger": "item",
             "formatter": "{b}: ¥{c} ({d}%)"
         },
         "legend": {
             "orient": "vertical",
-            # "left": "left",
             "right": "right",
             "top": "middle"
         },
@@ -523,6 +512,7 @@ def create_echarts_pie_chart(data, value_col, name_col, title, radius=['40%', '7
                 },
                 "label": {
                     "formatter": "{b}: {d}%"
+                    # "show": False,
                 }
             }
         ]
@@ -539,14 +529,14 @@ def create_echarts_bar_chart(data, x_col, y_col, title, color_scheme='primary'):
     y_data = data[y_col].round(2).tolist()
     
     option = {
-        "title": {
-            "text": title,
-            "left": "center",
-            "textStyle": {
-                "fontSize": 16,
-                "fontWeight": "bold"
-            }
-        },
+        # "title": {
+        #     "text": title,
+        #     "left": "center",
+        #     "textStyle": {
+        #         "fontSize": 16,
+        #         "fontWeight": "bold"
+        #     }
+        # },
         "tooltip": {
             "trigger": "axis",
             "axisPointer": {
@@ -574,7 +564,7 @@ def create_echarts_bar_chart(data, x_col, y_col, title, color_scheme='primary'):
         },
         "yAxis": {
             "type": "value",
-            "name": "数量",
+            "name": "金额",
             "axisLine": {
                 "show": True
             }
@@ -614,9 +604,9 @@ def create_echarts_bar_chart(data, x_col, y_col, title, color_scheme='primary'):
     
     return option
 
-# ==================== 优化的总数分析组件 ====================
+# ==================== 总数分析组件 ====================
 def render_total_metrics_optimized(stats):
-    """渲染优化的总数分析指标"""
+    """总数分析指标"""
     # 使用Streamlit原生metric组件
     st.markdown("### 📈 核心业务指标")
     
@@ -799,7 +789,7 @@ def render_total_analysis_optimized(year_filter):
                     "TOP客户销售额", 'primary'
                 )
                 if option:
-                    st_echarts(option, height=400)
+                    st_echarts(option)
             
             with col2:
                 # 客户价值分析表格
@@ -863,7 +853,7 @@ def render_total_analysis_optimized(year_filter):
                     "热销产品销售额", 'danger'
                 )
                 if option:
-                    st_echarts(option, height=400)
+                    st_echarts(option)
             
             with col2:
                 # 产品价格分析表格
@@ -949,7 +939,7 @@ def render_total_analysis_optimized(year_filter):
         st.info("请确保已正确导入数据并初始化数据库")
 
 def create_department_analysis_tab_optimized(department, year_filter):
-    """创建优化的部门分析选项卡内容"""
+    """部门分析选项卡内容"""
     try:
         # 获取部门详细数据
         with get_connection() as conn:
@@ -1285,7 +1275,7 @@ with st.sidebar:
         st.rerun()
     
     if current_depts:
-        st.markdown("**部门分析**")
+        # st.markdown("**部门分析**")
         for dept in current_depts:
             if st.button(f"🏢 {dept}", width='stretch'):
                 st.session_state.current_view = f"🏢 {dept}"
@@ -1315,48 +1305,26 @@ else:
 
 # ==================== 页面底部说明 ====================
 with st.expander("📚 使用说明与性能提示", expanded=False):
-    col1, col2 = st.columns(2)
+    st.markdown("""
+    ### 📊 功能亮点
     
-    with col1:
-        st.markdown("""
-        ### 🚀 性能优化说明
-        
-        **查询优化**
-        - 所有查询都已添加缓存，数据变化时才重新计算
-        - 数据库索引自动创建，加速查询
-        - 大数据量时自动采样，保证响应速度
-        
-        **图表优化**
-        - 使用ECharts高性能图表引擎
-        - 复合图表支持dataZoom数据缩放
-        - 所有图表都经过性能调优
-        
-        **内存管理**
-        - 数据分页加载，避免内存溢出
-        - 自动清理缓存，防止内存泄漏
-        """)
+    **完整分析结构**
+    - 关键指标卡片展示
+    - 生产线详细分析（柱状图+饼图+表格）
+    - 时间趋势分析（复合图带dataZoom）
+    - 产品分析（热销产品TOP10+价格统计）
+    - 月度详细数据表格
     
-    with col2:
-        st.markdown("""
-        ### 📊 功能亮点
-        
-        **完整分析结构**
-        - 关键指标卡片展示
-        - 生产线详细分析（柱状图+饼图+表格）
-        - 时间趋势分析（复合图带dataZoom）
-        - 产品分析（热销产品TOP10+价格统计）
-        - 月度详细数据表格
-        
-        **智能图表**
-        - 复合图表（折线+柱状）带dataZoom
-        - 交互式数据探索
-        - 支持图表导出为图片
-        
-        **数据管理**
-        - 一键导出各种格式数据
-        - 支持按年份筛选分析
-        - 实时数据更新与缓存
-        """)
+    **智能图表**
+    - 复合图表（折线+柱状）带dataZoom
+    - 交互式数据探索
+    - 支持图表导出为图片
+    
+    **数据管理**
+    - 一键导出各种格式数据
+    - 支持按年份筛选分析
+    - 实时数据更新与缓存
+    """)
 
 # 页面加载完成提示
 st.toast("✅ 页面加载完成！", icon="🎉")
