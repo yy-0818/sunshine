@@ -129,19 +129,22 @@ class SalesDebtIntegrationService:
         
         if not sales_df.empty:
             sales_df = clean_data(sales_df)
+            print(f"清洗后销售数据: {len(sales_df)} 条")
         
         if not debt_df.empty:
             debt_df = clean_data(debt_df)
+            print(f"清洗后欠款数据: {len(debt_df)} 条")
         
         # 4. 建立销售数据索引
         sales_index = {}
         
         if not sales_df.empty:
-            for _, row in sales_df.iterrows():
+            for idx, row in sales_df.iterrows():
                 finance_id = row.get('finance_id_clean', '')
                 department = row.get('department_clean', '')
                 
                 if not finance_id:
+                    print(f"销售记录 {idx} 财务编号为空: {row['customer_name']}")
                     continue
                     
                 # 创建唯一键
@@ -158,7 +161,9 @@ class SalesDebtIntegrationService:
                         'days_since_last_sale': row['days_since_last_sale'],
                         '销售活跃度': row['销售活跃度'],
                         'matched': False,
-                        'customer_names': [row['customer_name_clean']]
+                        'customer_names': [row['customer_name_clean']],
+                        'original_names': [row['customer_name']],
+                        'original_finance_id': row['finance_id']
                     }
                 else:
                     # 如果已存在，合并数据
@@ -181,19 +186,35 @@ class SalesDebtIntegrationService:
                     # 添加客户名称到列表
                     if row['customer_name_clean'] not in sales_index[key]['customer_names']:
                         sales_index[key]['customer_names'].append(row['customer_name_clean'])
+                        sales_index[key]['original_names'].append(row['customer_name'])
+        
+        print(f"建立销售索引: {len(sales_index)} 个唯一键")
         
         # 5. 匹配逻辑 - 严格一对一匹配
         matched_records = []
+        unmatched_sales_keys = []  # 记录未匹配的销售记录键
+        unmatched_debt_records = []  # 记录未匹配的欠款记录
         
-        for _, debt_row in debt_df.iterrows():
+        for idx, debt_row in debt_df.iterrows():
             finance_id = debt_row.get('finance_id_clean', '')
             department = debt_row.get('department_clean', '')
+            original_finance_id = debt_row.get('finance_id', '')
+            original_customer_name = debt_row.get('customer_name', '')
             
             if not finance_id:
                 # 财务编号为空，只能创建欠款记录
+                print(f"欠款记录 {idx} 财务编号为空: {original_customer_name}")
+                unmatched_debt_records.append({
+                    'type': '财务编号为空',
+                    'original_finance_id': original_finance_id,
+                    'original_customer_name': original_customer_name,
+                    'department': department,
+                    'debt_2025': float(debt_row.get('debt_2025', 0)) if pd.notna(debt_row.get('debt_2025')) else 0.0
+                })
+                
                 matched_records.append({
-                    '财务编号': debt_row.get('finance_id', ''),
-                    '客户名称': debt_row.get('customer_name', ''),
+                    '财务编号': original_finance_id,
+                    '客户名称': original_customer_name,
                     '所属部门': department,
                     '总销售额': 0.0,
                     f'20{current_year}销售额': 0.0,
@@ -226,12 +247,14 @@ class SalesDebtIntegrationService:
                     # 如果欠款客户名称在销售客户名称列表中，使用它
                     if debt_customer_name in sales_match['customer_names']:
                         best_customer_match = debt_customer_name
+                        print(f"✅ 精确匹配: {original_finance_id}|{department} - {debt_customer_name}")
                     else:
                         # 否则使用第一个销售客户名称
                         best_customer_match = sales_match['customer_names'][0]
+                        print(f"🔄 名称差异匹配: {original_finance_id}|{department} - 欠款名称: {debt_customer_name}, 销售名称: {best_customer_match}")
                 
                 matched_records.append({
-                    '财务编号': debt_row.get('finance_id', ''),
+                    '财务编号': original_finance_id,
                     '客户名称': best_customer_match,
                     '所属部门': department,
                     '总销售额': sales_match['total_amount'],
@@ -251,9 +274,32 @@ class SalesDebtIntegrationService:
                 sales_index[key]['matched'] = True
             else:
                 # 没有匹配的销售记录
+                if key in sales_index:
+                    # 销售记录已被其他欠款记录匹配
+                    print(f"❌ 销售记录已被占用: {key}")
+                    unmatched_debt_records.append({
+                        'type': '销售记录已被占用',
+                        'original_finance_id': original_finance_id,
+                        'original_customer_name': original_customer_name,
+                        'department': department,
+                        'debt_2025': float(debt_row.get('debt_2025', 0)) if pd.notna(debt_row.get('debt_2025')) else 0.0,
+                        'sales_key': key
+                    })
+                else:
+                    # 完全找不到销售记录
+                    print(f"❌ 无匹配销售记录: {key} - {original_customer_name}")
+                    unmatched_debt_records.append({
+                        'type': '无销售记录',
+                        'original_finance_id': original_finance_id,
+                        'original_customer_name': original_customer_name,
+                        'department': department,
+                        'debt_2025': float(debt_row.get('debt_2025', 0)) if pd.notna(debt_row.get('debt_2025')) else 0.0,
+                        'sales_key': key
+                    })
+                
                 matched_records.append({
-                    '财务编号': debt_row.get('finance_id', ''),
-                    '客户名称': debt_row.get('customer_name', ''),
+                    '财务编号': original_finance_id,
+                    '客户名称': original_customer_name,
                     '所属部门': department,
                     '总销售额': 0.0,
                     f'20{current_year}销售额': 0.0,
@@ -268,7 +314,62 @@ class SalesDebtIntegrationService:
                     '2025欠款': float(debt_row.get('debt_2025', 0)) if pd.notna(debt_row.get('debt_2025')) else 0.0
                 })
         
-        # 6. 创建DataFrame并计算指标
+        # 6. 检查未匹配的销售记录（销售数据中有，但欠款数据中没有的）
+        unmatched_sales_records = []
+        unmatched_sales_total = 0
+        
+        for key, sales_data in sales_index.items():
+            if not sales_data['matched']:
+                unmatched_sales_keys.append(key)
+                unmatched_sales_total += sales_data['total_amount']
+                unmatched_sales_records.append({
+                    'key': key,
+                    'finance_id': sales_data['original_finance_id'],
+                    'customer_names': sales_data['original_names'],
+                    'department': key.split('|')[1],
+                    'total_amount': sales_data['total_amount'],
+                    'year_amount': sales_data['year_amount'],
+                    'last_sale_date': sales_data['last_sale_date']
+                })
+        
+        # 打印详细的匹配统计信息
+        print("\n" + "="*80)
+        print("数据匹配统计报告")
+        print("="*80)
+        
+        print(f"\n📊 总体统计:")
+        print(f"  欠款记录总数: {len(debt_df)}")
+        print(f"  销售记录总数: {len(sales_df)}")
+        print(f"  匹配后总记录数: {len(matched_records)}")
+        
+        print(f"\n✅ 匹配成功:")
+        print(f"  有销售记录的客户: {len(matched_records) - len(unmatched_debt_records)}")
+        
+        print(f"\n❌ 未匹配的欠款记录 ({len(unmatched_debt_records)} 条):")
+        for record in unmatched_debt_records[:10]:  # 只显示前10条
+            print(f"  - 类型: {record['type']}, 财务编号: {record['original_finance_id']}, 客户: {record['original_customer_name']}, 部门: {record['department']}, 欠款: ¥{record['debt_2025']:,.2f}")
+        if len(unmatched_debt_records) > 10:
+            print(f"  ... 还有 {len(unmatched_debt_records) - 10} 条未显示")
+        
+        print(f"\n📈 未匹配的销售记录 ({len(unmatched_sales_records)} 条，总金额: ¥{unmatched_sales_total:,.2f}):")
+        for record in unmatched_sales_records[:10]:  # 只显示前10条
+            customer_name = record['customer_names'][0] if record['customer_names'] else '未知'
+            print(f"  - 财务编号: {record['finance_id']}, 客户: {customer_name}, 部门: {record['department']}, 总销售额: ¥{record['total_amount']:,.2f}, 年度销售额: ¥{record['year_amount']:,.2f}")
+        if len(unmatched_sales_records) > 10:
+            print(f"  ... 还有 {len(unmatched_sales_records) - 10} 条未显示")
+        
+        print("\n🎯 匹配率分析:")
+        if len(debt_df) > 0:
+            match_rate = ((len(matched_records) - len(unmatched_debt_records)) / len(debt_df)) * 100
+            print(f"  欠款记录匹配率: {match_rate:.1f}%")
+        
+        if len(sales_df) > 0:
+            sales_match_rate = (len(sales_index) - len(unmatched_sales_records)) / len(sales_index) * 100
+            print(f"  销售记录匹配率: {sales_match_rate:.1f}%")
+        
+        print("="*80 + "\n")
+        
+        # 7. 创建DataFrame并计算指标
         if not matched_records:
             return pd.DataFrame()
         
@@ -407,10 +508,7 @@ class SalesDebtIntegrationService:
                 return {}
             
             year_debt_column = f'20{year}欠款'
-            year_sales_column = f'20{year}销售额'
-            
             total_debt = integrated_df[year_debt_column].sum() if year_debt_column in integrated_df.columns else 0
-            total_sales = integrated_df[year_sales_column].sum() if year_sales_column in integrated_df.columns else 0
             
             # 计算高风险客户数量
             high_risk_count = 0
@@ -422,7 +520,6 @@ class SalesDebtIntegrationService:
             
             return {
                 '总欠款': total_debt,
-                '总销售额': total_sales,
                 '高风险客户数量': high_risk_count,
                 '平均风险评分': avg_score
             }
