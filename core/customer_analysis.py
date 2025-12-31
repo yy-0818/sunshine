@@ -7,61 +7,8 @@ class SalesDebtIntegrationService:
     def __init__(self):
         pass
     
-    def _get_year_sales_data(self, year=25):
-        """获取指定年份的销售数据 - 按财务编号分组汇总"""
-        sales_df = pd.DataFrame()
-        with get_connection() as conn:
-            # 获取指定年份的销售数据，按财务编号、客户名称、部门分组
-            sales_query = f'''
-                SELECT 
-                    finance_id,
-                    customer_name,
-                    department,
-                    SUM(amount) as year_amount,
-                    SUM(quantity) as year_quantity,
-                    COUNT(DISTINCT product_name) as unique_products,
-                    COUNT(*) as transaction_count,
-                    MAX(date('20' || substr('00' || year, -2) || '-' || 
-                          substr('00' || month, -2) || '-' || 
-                          substr('00' || day, -2))) as last_sale_date
-                FROM sales_records
-                WHERE finance_id IS NOT NULL 
-                    AND finance_id != '' 
-                    AND TRIM(finance_id) != ''
-                    AND year = '{year}'
-                GROUP BY finance_id, customer_name, department
-                ORDER BY finance_id, customer_name, department
-            '''
-            sales_df = pd.read_sql(sales_query, conn)
-            
-            if not sales_df.empty:
-                print(f"获取到 {year} 年销售数据: {len(sales_df)} 条记录")
-                
-                # 添加活跃度分类
-                sales_df['last_sale_date'] = pd.to_datetime(sales_df['last_sale_date'], errors='coerce')
-                current_date = pd.Timestamp.now()
-                sales_df['days_since_last_sale'] = (current_date - sales_df['last_sale_date']).dt.days
-                
-                def classify_activity(days):
-                    if pd.isna(days):
-                        return '无销售记录'
-                    elif days <= 30:
-                        return '活跃(30天内)'
-                    elif days <= 90:
-                        return '一般活跃(90天内)'
-                    elif days <= 180:
-                        return '低活跃(180天内)'
-                    elif days <= 365:
-                        return '休眠客户'
-                    # else:
-                    #     return '一年内无销售'
-                
-                sales_df['销售活跃度'] = sales_df['days_since_last_sale'].apply(classify_activity)
-        
-        return sales_df
-    
     def get_integrated_customer_analysis(self, current_year=25):
-        """获取综合客户分析数据 - 支持年度销售额"""
+        """获取综合客户分析数据 - 优化版分类模型"""
         # 1. 获取所有欠款数据
         debt_df = get_all_debt_data()
         print(f"欠款数据: {len(debt_df)} 条记录")
@@ -100,7 +47,7 @@ class SalesDebtIntegrationService:
             else:
                 print(f"销售数据: {len(sales_df)} 条记录")
                 
-                # 添加活跃度分类
+                # 添加活跃度分类（优化版）
                 sales_df['last_sale_date'] = pd.to_datetime(sales_df['last_sale_date'], errors='coerce')
                 current_date = pd.Timestamp.now()
                 sales_df['days_since_last_sale'] = (current_date - sales_df['last_sale_date']).dt.days
@@ -109,19 +56,19 @@ class SalesDebtIntegrationService:
                     if pd.isna(days):
                         return '无销售记录'
                     elif days <= 30:
-                        return '活跃(30天内)'
+                        return '活跃客户(30天内)'
                     elif days <= 90:
                         return '一般活跃(90天内)'
                     elif days <= 180:
                         return '低活跃(180天内)'
                     elif days <= 365:
-                        return '休眠客户'
+                        return '休眠客户(1年内)'
                     else:
-                        return '一年内无销售'
+                        return '无销售记录'  # 统一为无销售记录
                 
                 sales_df['销售活跃度'] = sales_df['days_since_last_sale'].apply(classify_activity)
                 
-                # 获取年度销售数据（复用现有数据过滤）
+                # 获取年度销售数据
                 year_sales_query = f'''
                     SELECT 
                         finance_id,
@@ -155,7 +102,7 @@ class SalesDebtIntegrationService:
                     sales_df['year_amount'] = 0.0
                     print(f"未找到 {current_year} 年销售数据")
         
-        # 3. 基本数据清洗 - 只做最基本的处理
+        # 3. 基本数据清洗
         def clean_data(df):
             df = df.copy()
             if 'finance_id' in df.columns:
@@ -188,7 +135,6 @@ class SalesDebtIntegrationService:
         
         # 4. 建立销售数据索引
         sales_index = {}
-        unmatched_sales = []  # 存储未匹配的销售记录
         
         if not sales_df.empty:
             for _, row in sales_df.iterrows():
@@ -215,7 +161,7 @@ class SalesDebtIntegrationService:
                         'customer_names': [row['customer_name_clean']]
                     }
                 else:
-                    # 如果已存在，合并数据（理论上不应该出现）
+                    # 如果已存在，合并数据
                     sales_index[key]['total_amount'] += float(row['total_amount']) if pd.notna(row['total_amount']) else 0.0
                     sales_index[key]['year_amount'] += float(row['year_amount']) if pd.notna(row['year_amount']) else 0.0
                     sales_index[key]['total_quantity'] += int(row['total_quantity']) if pd.notna(row['total_quantity']) else 0
@@ -322,184 +268,178 @@ class SalesDebtIntegrationService:
                     '2025欠款': float(debt_row.get('debt_2025', 0)) if pd.notna(debt_row.get('debt_2025')) else 0.0
                 })
         
-        # 6. 检查未匹配的销售记录（可选）
-        unmatched_sales_total = 0
-        for key, sales_data in sales_index.items():
-            if not sales_data['matched']:
-                unmatched_sales_total += sales_data['total_amount']
-                print(f"未匹配的销售记录: {key}, 销售额: {sales_data['total_amount']}")
-        
-        if unmatched_sales_total > 0:
-            print(f"有未匹配的销售记录，总金额: ¥{unmatched_sales_total:,.2f}")
-        
-        # 7. 创建DataFrame并计算指标
+        # 6. 创建DataFrame并计算指标
         if not matched_records:
             return pd.DataFrame()
         
         merged_df = pd.DataFrame(matched_records)
         print(f"合并后数据: {len(merged_df)} 条记录")
         
-        # 计算总销售额并与数据库对比
-        total_sales_calculated = merged_df['总销售额'].sum()
-        print(f"计算的总销售额: ¥{total_sales_calculated:,.2f}")
+        # 添加年度欠款列
+        year_debt_column = f'20{current_year}欠款'
+        if current_year == 25:
+            merged_df[year_debt_column] = merged_df['2025欠款']
+        elif current_year == 24:
+            merged_df[year_debt_column] = merged_df['2024欠款']
+        elif current_year == 23:
+            merged_df[year_debt_column] = merged_df['2023欠款']
         
-        # 计算年度销售额
+        # 计算欠销比（使用对应年份的销售额和欠款）
         year_sales_column = f'20{current_year}销售额'
-        year_sales_calculated = merged_df[year_sales_column].sum()
-        print(f"计算的{current_year}年销售额: ¥{year_sales_calculated:,.2f}")
-        
-        # 直接从数据库获取实际总销售额
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT SUM(amount) FROM sales_records")
-            total_sales_actual = cursor.fetchone()[0] or 0
-            print(f"数据库实际总销售额: ¥{total_sales_actual:,.2f}")
-            
-            # 获取年度实际销售额
-            cursor.execute(f"SELECT SUM(amount) FROM sales_records WHERE year = '{current_year}'")
-            year_sales_actual = cursor.fetchone()[0] or 0
-            print(f"数据库{current_year}年实际销售额: ¥{year_sales_actual:,.2f}")
-            
-            # 计算匹配率
-            if total_sales_actual > 0:
-                match_rate = (total_sales_calculated / total_sales_actual) * 100
-                print(f"销售额匹配率: {match_rate:.2f}%")
-            
-            if year_sales_actual > 0:
-                year_match_rate = (year_sales_calculated / year_sales_actual) * 100
-                print(f"{current_year}年销售额匹配率: {year_match_rate:.2f}%")
-        
-        # 计算欠销比
-        year_key = f'20{current_year}欠款'
         merged_df['欠销比'] = merged_df.apply(
-            lambda row: (row[year_key] / row[year_sales_column] * 100) if row[year_sales_column] > 0 else 0,
+            lambda row: (row[year_debt_column] / row[year_sales_column] * 100) if row[year_sales_column] > 0 else 0,
             axis=1
         )
         
-        # 客户分类和风险评分
-        merged_df['客户综合等级'] = merged_df.apply(self._classify_customer, axis=1)
-        merged_df['风险评分'] = merged_df.apply(self._calculate_risk_score, axis=1)
-        merged_df['风险等级'] = merged_df['风险评分'].apply(self._classify_risk)
+        # 客户分类和风险评分（优化版）
+        merged_df['客户综合等级'] = merged_df.apply(self._classify_customer_optimized, axis=1, current_year=current_year)
+        merged_df['风险评分'] = merged_df.apply(self._calculate_risk_score_optimized, axis=1, current_year=current_year)
         
         return merged_df
-
-    def _classify_customer(self, row):
-        total_sales = row.get('总销售额', 0)
-        debt_2025 = row.get('2025欠款', 0)
+    
+    def _classify_customer_optimized(self, row, current_year=25):
+        """优化版客户分类逻辑"""
+        year_sales_column = f'20{current_year}销售额'
+        year_debt_column = f'20{current_year}欠款'
+        
+        year_sales = row.get(year_sales_column, 0)
+        year_debt = row.get(year_debt_column, 0)
         activity = row.get('销售活跃度', '无销售记录')
-        
-        if debt_2025 > 0 and total_sales == 0:
-            return 'E-纯欠款客户'
-        
-        if debt_2025 == 0:
-            if total_sales == 0:
-                return 'D-无销售无欠款'
-            elif activity == '一年内无销售':
-                return 'C-长期无交易客户'
-            elif total_sales > 50000:
-                if activity in ['活跃(30天内)', '一般活跃(90天内)']:
-                    return 'A-优质大客户'
-                else:
-                    return 'B-大额休眠客户'
-            elif total_sales > 10000:
-                if activity in ['活跃(30天内)', '一般活跃(90天内)']:
-                    return 'A-优质活跃客户'
-                else:
-                    return 'B-一般客户'
-            else:
-                return 'C-小额客户'
-        
         debt_ratio = row.get('欠销比', 0) / 100
         
-        if debt_ratio < 0.2:
-            if activity == '活跃(30天内)':
-                return 'B1-低风险活跃欠款'
-            else:
-                return 'B2-低风险欠款'
-        elif debt_ratio < 0.5:
-            if activity == '活跃(30天内)':
-                return 'C1-中风险活跃欠款'
-            else:
-                return 'C2-中风险欠款'
-        else:
-            if debt_ratio > 1.0:
-                return 'D-高风险欠款'
-            else:
-                return 'D-高风险欠款'
-    
-    def _calculate_risk_score(self, row):
-        score = 100
+        # 无销售记录且有欠款 - 最高风险
+        if year_sales == 0 and year_debt > 0:
+            return 'E2-无销售高欠款'
         
-        total_sales = row.get('总销售额', 0)
-        debt_2025 = row.get('2025欠款', 0)
+        # 有销售记录的情况
+        if year_debt == 0:
+            # 无欠款客户
+            if year_sales >= 5_000_000:  # 500万以上
+                if activity in ['活跃客户(30天内)', '一般活跃(90天内)']:
+                    return 'A1-核心大客户'
+                else:
+                    return 'B1-良好稳定客户'
+            elif year_sales >= 500_000:  # 50万以上
+                if activity in ['活跃客户(30天内)', '一般活跃(90天内)']:
+                    return 'A2-优质活跃客户'
+                else:
+                    return 'B2-一般活跃客户'
+            elif year_sales > 0:
+                if activity in ['活跃客户(30天内)', '一般活跃(90天内)']:
+                    return 'C1-需关注客户'
+                else:
+                    return 'C3-低活跃客户'
+            else:
+                return 'C1-需关注客户'
+        else:
+            # 有欠款客户
+            if debt_ratio <= 0.2:  # 欠销比 ≤ 20%
+                if activity in ['活跃客户(30天内)', '一般活跃(90天内)']:
+                    return 'B3-低风险欠款客户'
+                else:
+                    return 'C2-中风险欠款客户'
+            elif debt_ratio <= 0.5:  # 20% < 欠销比 ≤ 50%
+                return 'C2-中风险欠款客户'
+            elif debt_ratio <= 1.0:  # 50% < 欠销比 ≤ 100%
+                return 'D1-高风险欠款客户'
+            else:  # 欠销比 > 100%
+                return 'E1-严重风险客户'
+    
+    def _calculate_risk_score_optimized(self, row, current_year=25):
+        """优化版风险评分计算"""
+        year_sales_column = f'20{current_year}销售额'
+        year_debt_column = f'20{current_year}欠款'
+        
+        year_sales = row.get(year_sales_column, 0)
+        year_debt = row.get(year_debt_column, 0)
         activity = row.get('销售活跃度', '无销售记录')
         
-        if debt_2025 > 0 and total_sales == 0:
-            return 0
+        score = 100
         
-        if debt_2025 > 0:
-            score -= 10
-            
-            if debt_2025 > 100000:
-                score -= 35
-            elif debt_2025 > 50000:
-                score -= 25
-            elif debt_2025 > 10000:
-                score -= 15
-            
-            if total_sales > 0:
-                debt_ratio = debt_2025 / total_sales
-                if debt_ratio > 1.0:
-                    score -= 35
-                elif debt_ratio > 0.5:
-                    score -= 25
-                elif debt_ratio > 0.2:
-                    score -= 15
-                elif debt_ratio > 0:
-                    score -= 5
-        else:
-            score += 5
+        # 1. 欠销比扣分（核心权重）
+        if year_sales > 0:
+            debt_ratio = year_debt / year_sales
+            if debt_ratio <= 0.2:
+                score -= 0  # 不扣分
+            elif debt_ratio <= 0.5:
+                score -= (debt_ratio - 0.2) * 200  # 线性扣分，最多扣60分
+            else:
+                score -= 60 + (debt_ratio - 0.5) * 400  # 严厉扣分
+        elif year_debt > 0:
+            # 无销售但有欠款，直接扣100分
+            score -= 100
         
-        if activity == '一年内无销售':
-            score -= 30
-        elif activity == '休眠客户':
+        # 2. 活跃度扣分
+        activity_penalty = {
+            '活跃客户(30天内)': 0,
+            '一般活跃(90天内)': 5,
+            '低活跃(180天内)': 10,
+            '休眠客户(1年内)': 20,
+            '无销售记录': 30
+        }
+        score -= activity_penalty.get(activity, 30)
+        
+        # 3. 欠款规模扣分
+        if year_debt > 1_000_000:  # 100万以上
             score -= 20
-        elif activity == '无销售记录':
-            score -= 25
-        elif activity == '低活跃(180天内)':
+        elif year_debt > 500_000:  # 50-100万
             score -= 10
-        elif activity == '一般活跃(90天内)':
+        elif year_debt > 100_000:  # 10-50万
             score -= 5
         
-        if total_sales > 50000:
+        # 4. 销售规模加分（上限100分）
+        if year_sales >= 5_000_000:  # 500万以上
+            score += 15
+        elif year_sales >= 1_000_000:  # 100-500万
             score += 10
-        elif total_sales > 10000:
+        elif year_sales >= 500_000:  # 50-100万
             score += 5
         
-        return max(0, min(100, int(score)))
+        # 确保分数在0-100范围内
+        return max(0, min(100, round(score)))
     
-    def _classify_risk(self, score):
-        if score >= 80:
-            return '低风险'
-        elif score >= 60:
-            return '较低风险'
-        elif score >= 40:
-            return '中等风险'
-        elif score >= 20:
-            return '较高风险'
-        else:
-            return '高风险'
-
-    def get_customer_detail(self, search_term):
-        """单客户详情查询"""
+    def get_summary_statistics(self, year):
+        """获取指定年份的统计数据"""
+        try:
+            integrated_df = self.get_integrated_customer_analysis(year)
+            
+            if integrated_df.empty:
+                return {}
+            
+            year_debt_column = f'20{year}欠款'
+            year_sales_column = f'20{year}销售额'
+            
+            total_debt = integrated_df[year_debt_column].sum() if year_debt_column in integrated_df.columns else 0
+            total_sales = integrated_df[year_sales_column].sum() if year_sales_column in integrated_df.columns else 0
+            
+            # 计算高风险客户数量
+            high_risk_count = 0
+            if '风险评分' in integrated_df.columns:
+                high_risk_count = len(integrated_df[integrated_df['风险评分'] < 40])
+            
+            # 计算平均风险评分
+            avg_score = integrated_df['风险评分'].mean() if '风险评分' in integrated_df.columns else 0
+            
+            return {
+                '总欠款': total_debt,
+                '总销售额': total_sales,
+                '高风险客户数量': high_risk_count,
+                '平均风险评分': avg_score
+            }
+        except:
+            return {}
+    
+    def get_customer_detail(self, search_term, year=25):
+        """单客户详情查询 - 支持年份筛选"""
         if not search_term or str(search_term).strip() == '':
             return {
                 'sales_records': pd.DataFrame(),
                 'debt_records': pd.DataFrame(),
-                'total_sales': 0,
-                'recent_transactions': 0,
+                'year_sales': 0,
+                'year_transactions': 0,
                 'finance_ids': [],
-                'matched_customer_names': []
+                'matched_customer_names': [],
+                'risk_score': 0
             }
         
         search_term = str(search_term).strip()
@@ -591,18 +531,87 @@ class SalesDebtIntegrationService:
                 matched_customer_names = list(set(matched_customer_names))
                 finance_ids = list(set(finance_ids))
             
-            # 计算总销售额和最近交易次数
-            total_sales = sales_df['amount'].sum() if not sales_df.empty else 0
-            recent_transactions = 0
-            if not sales_df.empty and 'year' in sales_df.columns:
-                current_year = 25
-                recent_transactions = len(sales_df[sales_df['year'] == current_year])
+            # 计算指定年份的销售额和交易次数
+            year_sales = 0
+            year_transactions = 0
+            
+            if not sales_df.empty and 'year' in sales_df.columns and 'amount' in sales_df.columns:
+                year_sales_df = sales_df[sales_df['year'] == year]
+                year_sales = year_sales_df['amount'].sum() if not year_sales_df.empty else 0
+                year_transactions = len(year_sales_df)
+            
+            # 计算风险评分
+            risk_score = 0
+            if not sales_df.empty or not debt_df.empty:
+                # 模拟计算风险评分
+                total_sales = sales_df['amount'].sum() if not sales_df.empty else 0
+                
+                # 获取指定年份的欠款
+                year_debt = 0
+                if not debt_df.empty:
+                    if year == 25 and 'debt_2025' in debt_df.columns:
+                        year_debt = debt_df['debt_2025'].sum()
+                    elif year == 24 and 'debt_2024' in debt_df.columns:
+                        year_debt = debt_df['debt_2024'].sum()
+                    elif year == 23 and 'debt_2023' in debt_df.columns:
+                        year_debt = debt_df['debt_2023'].sum()
+                
+                # 计算活跃度
+                activity = '无销售记录'
+                if not sales_df.empty and 'record_date' in sales_df.columns:
+                    latest_date = pd.to_datetime(sales_df['record_date'].max(), errors='coerce')
+                    if pd.notna(latest_date):
+                        days_diff = (pd.Timestamp.now() - latest_date).days
+                        if days_diff <= 30:
+                            activity = '活跃客户(30天内)'
+                        elif days_diff <= 90:
+                            activity = '一般活跃(90天内)'
+                        elif days_diff <= 180:
+                            activity = '低活跃(180天内)'
+                        elif days_diff <= 365:
+                            activity = '休眠客户(1年内)'
+                
+                # 计算风险评分
+                score = 100
+                
+                # 欠销比扣分
+                if year_sales > 0:
+                    debt_ratio = year_debt / year_sales
+                    if debt_ratio <= 0.2:
+                        score -= 0
+                    elif debt_ratio <= 0.5:
+                        score -= (debt_ratio - 0.2) * 200
+                    else:
+                        score -= 60 + (debt_ratio - 0.5) * 400
+                elif year_debt > 0:
+                    score -= 100
+                
+                # 活跃度扣分
+                activity_penalty = {
+                    '活跃客户(30天内)': 0,
+                    '一般活跃(90天内)': 5,
+                    '低活跃(180天内)': 10,
+                    '休眠客户(1年内)': 20,
+                    '无销售记录': 30
+                }
+                score -= activity_penalty.get(activity, 30)
+                
+                # 销售规模加分
+                if year_sales >= 5_000_000:
+                    score += 15
+                elif year_sales >= 1_000_000:
+                    score += 10
+                elif year_sales >= 500_000:
+                    score += 5
+                
+                risk_score = max(0, min(100, round(score)))
             
             return {
                 'sales_records': sales_df,
                 'debt_records': debt_df,
-                'total_sales': total_sales,
-                'recent_transactions': recent_transactions,
+                'year_sales': year_sales,
+                'year_transactions': year_transactions,
                 'finance_ids': finance_ids,
-                'matched_customer_names': matched_customer_names
+                'matched_customer_names': matched_customer_names,
+                'risk_score': risk_score
             }
