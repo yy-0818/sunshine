@@ -10,6 +10,4 @@ matplotlib==3.8.3
 seaborn==0.13.2
 scikit-learn==1.4.0
 xlrd==2.0.1
-python-dateutil==2.8.2
-pytz==2024.1
-tzdata==2024.1
+streamlit-echarts==0.6.2
